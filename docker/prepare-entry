@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+export LC_ALL=C
+umask 022
+
+readonly package=/submission/package
+readonly output=/entry
+
+[[ -f "$package" && ! -L "$package" ]] || {
+  echo "The submission package is missing or is a symbolic link." >&2
+  exit 2
+}
+[[ -d "$output" && ! -L "$output" ]] || {
+  echo "The package output directory is invalid." >&2
+  exit 2
+}
+if find -P "$output" -mindepth 1 -print -quit | grep -q .; then
+  echo "The package output directory must be empty." >&2
+  exit 2
+fi
+
+# bsdtar handles both tar-family archives and ZIP files. Extraction runs as the
+# contestant UID, without network access or capabilities, into the sole
+# writable mount supplied by prepare-entry.sh.
+bsdtar --extract --file "$package" --directory "$output" -m \
+  --no-same-owner --no-same-permissions
+
+if find -P "$output" -type l -print -quit | grep -q .; then
+  echo "Submission packages may not contain symbolic links." >&2
+  exit 2
+fi
+if find -P "$output" -mindepth 1 \
+    ! -type d ! -type f -print -quit | grep -q .; then
+  echo "Submission packages may contain only directories and regular files." >&2
+  exit 2
+fi
+mapfile -d '' top_level_members < <(
+  find -P "$output" -mindepth 1 -maxdepth 1 -print0
+)
+if (( ${#top_level_members[@]} != 1 )) \
+    || [[ ! -d "${top_level_members[0]:-}" || -L "${top_level_members[0]:-}" ]]; then
+  echo "The package must contain exactly one top-level directory." >&2
+  exit 2
+fi
+readonly package_root="${top_level_members[0]}"
+
+for required in install.sh build.sh; do
+  if [[ ! -f "$package_root/$required" || -L "$package_root/$required" ]]; then
+    echo "The package's top-level directory is missing the regular file $required." >&2
+    exit 2
+  fi
+done
+
+# Normalize the sole archive directory into the prepared entry root. Using
+# find rather than a glob includes dotfiles without special shell settings.
+find -P "$package_root" -mindepth 1 -maxdepth 1 \
+  -exec mv --target-directory="$output" -- {} +
+rmdir -- "$package_root"
+
+# Ensure the judge can inspect all staged source while retaining executable
+# bits on source-provided build helpers. The standard scripts get canonical
+# modes even when their package format (notably ZIP) omitted Unix mode data.
+find -P "$output" -mindepth 1 -exec chmod u=rwX,go=rX {} +
+chmod 0555 "$output/install.sh" "$output/build.sh"
+
+# This file is judge-generated rather than contestant-controlled. Dependency
+# image construction receives install.sh only; source and later scripts are
+# first exposed in the separate offline build container.
+printf '*\n!install.sh\n' > "$output/.dockerignore"
+chmod 0444 "$output/.dockerignore"

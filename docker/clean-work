@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+if [[ ! -d /work || /work == / ]]; then
+  echo "Refusing to clean an invalid work directory." >&2
+  exit 2
+fi
+
+find -P /work -depth -mindepth 1 -delete

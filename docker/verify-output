@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+export LC_ALL=C
+
+readonly report_dir=/work/report
+readonly run_dir=/work/run
+readonly reference=/reference/enwik9
+
+result() {
+  printf 'verification=%s\n' "$1"
+  printf 'reason=%s\n' "$2"
+  exit "${3:-1}"
+}
+
+if [[ ! -f "$reference" || -L "$reference" ]]; then
+  result fail invalid_reference 2
+fi
+
+if [[ ! -r "$report_dir/output_name" ]]; then
+  result fail no_reported_output 1
+fi
+
+IFS= read -r output_name < "$report_dir/output_name"
+if [[ ! "$output_name" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  result fail unsafe_output_name 1
+fi
+
+readonly output="$run_dir/$output_name"
+if [[ ! -f "$output" || -L "$output" ]]; then
+  result fail invalid_output 1
+fi
+
+reference_bytes="$(stat --format='%s' -- "$reference")"
+output_bytes="$(stat --format='%s' -- "$output")"
+reference_sha256="$(sha256sum -- "$reference" | awk '{print $1}')"
+output_sha256="$(sha256sum -- "$output" | awk '{print $1}')"
+
+printf 'reference_bytes=%s\n' "$reference_bytes"
+printf 'output_bytes=%s\n' "$output_bytes"
+printf 'reference_sha256=%s\n' "$reference_sha256"
+printf 'output_sha256=%s\n' "$output_sha256"
+
+if [[ "$reference_bytes" != "$output_bytes" ]]; then
+  result fail size_mismatch 1
+fi
+
+if ! cmp --silent -- "$reference" "$output"; then
+  result fail content_mismatch 1
+fi
+
+result pass identical 0

@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+umask 077
+
+readonly executable_name="${EXECUTABLE_NAME:?EXECUTABLE_NAME is required}"
+readonly arguments_name="${ARGUMENTS_NAME:?ARGUMENTS_NAME is required}"
+readonly payload_name="${PAYLOAD_NAME:-}"
+for value in "$executable_name" "$arguments_name" ${payload_name:+"$payload_name"}; do
+  [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
+    echo "Runtime artifact names must be plain filenames." >&2
+    exit 2
+  }
+done
+
+if [[ ! -f /submission/executable || -L /submission/executable ]]; then
+  echo "The submitted executable is missing or is a symbolic link." >&2
+  exit 2
+fi
+
+mkdir -p /work/run/tmp /work/report
+cp --reflink=never -- /submission/executable "/work/run/$executable_name"
+if [[ -f /submission/arguments && ! -L /submission/arguments ]]; then
+  cp --reflink=never -- /submission/arguments "/work/run/$arguments_name"
+else
+  touch "/work/run/$arguments_name"
+fi
+if [[ -s "/work/run/$arguments_name" ]]; then
+  final_arg_byte="$(tail --bytes=1 -- "/work/run/$arguments_name" \
+    | od --address-radix=n --format=u1 | tr -d '[:space:]')"
+  [[ "$final_arg_byte" == 10 ]] || {
+    echo "Nonempty argument file must end with a line feed." >&2
+    exit 2
+  }
+  LC_ALL=C tr -d '\nA-Za-z0-9_./:=+,%@-' < "/work/run/$arguments_name" \
+    | cmp --silent -- - /dev/null || {
+      echo "Argument file contains a byte outside the permitted alphabet." >&2
+      exit 2
+    }
+  ! grep --quiet '^$' "/work/run/$arguments_name" || {
+    echo "Argument file must not contain empty arguments." >&2
+    exit 2
+  }
+fi
+if [[ -n "$payload_name" ]]; then
+  [[ -f /submission/payload && ! -L /submission/payload ]] || {
+    echo "The declared payload is missing or invalid." >&2
+    exit 2
+  }
+  cp --reflink=never -- /submission/payload "/work/run/$payload_name"
+  chmod 0444 "/work/run/$payload_name"
+fi
+chmod 0555 "/work/run/$executable_name"
+chmod 0444 "/work/run/$arguments_name"
+# Keep the directory writable while its sticky bit prevents UID 65532 from
+# replacing root-owned staged inputs.
+chmod 1777 /work/run
+chmod 0700 /work/run/tmp /work/report
+chown 65532:65532 /work/run/tmp
+
+sha256sum "/work/run/$executable_name" | awk '{print $1}' > /work/report/executable.sha256
+stat --format='%s' "/work/run/$executable_name" > /work/report/executable.bytes
+chmod 0400 /work/report/executable.sha256 /work/report/executable.bytes

@@ -1,0 +1,4 @@
+Entries/*/archive9 filter=lfs diff=lfs merge=lfs -text
+Entries/*/*.tar.gz filter=lfs diff=lfs merge=lfs -text
+Geekbench-5.5.1-* filter=lfs diff=lfs merge=lfs -text
+UPX-*.tar.xz filter=lfs diff=lfs merge=lfs -text

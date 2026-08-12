@@ -1,0 +1,6 @@
+name: HutterPrize
+channels:
+  - conda-forge
+  - default
+dependencies:
+  - python

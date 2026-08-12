@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+umask 077
+
+readonly executable_name="${EXECUTABLE_NAME:?EXECUTABLE_NAME is required}"
+readonly arguments_name="${ARGUMENTS_NAME:?ARGUMENTS_NAME is required}"
+readonly input_name="${INPUT_NAME:?INPUT_NAME is required}"
+readonly output_name="${OUTPUT_NAME:?OUTPUT_NAME is required}"
+for value in "$executable_name" "$arguments_name" "$input_name" "$output_name"; do
+  [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
+    echo "Runtime artifact names must be plain filenames." >&2
+    exit 2
+  }
+done
+
+for required in /submission/executable /submission/arguments; do
+  if [[ ! -f "$required" || -L "$required" ]]; then
+    echo "Missing or invalid staged file: $required" >&2
+    exit 2
+  fi
+done
+
+if [[ -s /submission/arguments ]]; then
+  readonly final_arg_byte="$(tail --bytes=1 -- /submission/arguments \
+    | od --address-radix=n --format=u1 | tr -d '[:space:]')"
+  if [[ "$final_arg_byte" != 10 ]]; then
+    echo "Nonempty argument file must end with a line feed." >&2
+    exit 2
+  fi
+  if LC_ALL=C tr -d '\nA-Za-z0-9_./:=+,%@-' \
+      < /submission/arguments | cmp --silent -- - /dev/null; then
+    :
+  else
+    echo "Argument file contains a byte outside the permitted alphabet." >&2
+    exit 2
+  fi
+  if grep --quiet '^$' /submission/arguments; then
+    echo "Argument file must not contain empty arguments." >&2
+    exit 2
+  fi
+fi
+
+mkdir -p /work/run/tmp /work/report
+cp --reflink=never -- /submission/executable "/work/run/$executable_name"
+cp --reflink=never -- /submission/arguments "/work/run/$arguments_name"
+touch "/work/run/$input_name"
+chmod 0555 "/work/run/$executable_name"
+chmod 0444 "/work/run/$arguments_name" "/work/run/$input_name"
+chmod 1777 /work/run
+chmod 0700 /work/run/tmp /work/report
+chown 65532:65532 /work/run/tmp
+
+sha256sum "/work/run/$executable_name" | awk '{print $1}' > /work/report/executable.sha256
+stat --format='%s' "/work/run/$executable_name" > /work/report/executable.bytes
+sha256sum "/work/run/$arguments_name" | awk '{print $1}' > /work/report/arguments.sha256
+stat --format='%s' "/work/run/$arguments_name" > /work/report/arguments.bytes
+chmod 0400 /work/report/executable.sha256 /work/report/executable.bytes \
+  /work/report/arguments.sha256 /work/report/arguments.bytes

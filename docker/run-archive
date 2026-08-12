@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+export LC_ALL=C
+umask 077
+
+readonly expected_size="${EXPECTED_SIZE:-1000000000}"
+readonly expected_output="${EXPECTED_OUTPUT:?EXPECTED_OUTPUT is required}"
+readonly time_limit_seconds="${TIME_LIMIT_SECONDS:-192366}"
+readonly memory_limit_bytes="${MEMORY_LIMIT_BYTES:-10737418240}"
+readonly disk_limit_bytes="${DISK_LIMIT_BYTES:-100000000000}"
+readonly disk_poll_seconds="${DISK_POLL_SECONDS:-10}"
+readonly report_dir=/work/report
+readonly run_dir=/work/run
+readonly executable_name="${EXECUTABLE_NAME:?EXECUTABLE_NAME is required}"
+readonly arguments_name="${ARGUMENTS_NAME:?ARGUMENTS_NAME is required}"
+readonly executable="$run_dir/$executable_name"
+readonly proc_self_dir=/opt/contestant-root/proc/self
+
+case "$expected_size:$time_limit_seconds:$memory_limit_bytes:$disk_limit_bytes:$disk_poll_seconds" in
+  *[!0-9:]*|'')
+    echo "Resource limits must be unsigned decimal integers." >&2
+    exit 2
+    ;;
+esac
+
+if [[ ! "$expected_output" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "EXPECTED_OUTPUT must be a plain file name." >&2
+  exit 2
+fi
+
+if [[ ! -x "$executable" || ! -f "$run_dir/$arguments_name" \
+    || -L "$run_dir/$arguments_name" ]]; then
+  echo "The staged executable or argument vector is invalid." >&2
+  exit 2
+fi
+if [[ ! -d "$proc_self_dir" || -e "$proc_self_dir/exe" \
+    || -L "$proc_self_dir/exe" ]]; then
+  echo "The private proc/self staging directory is invalid." >&2
+  exit 2
+fi
+ln -s -- "/work/run/$executable_name" "$proc_self_dir/exe"
+
+write_report_value() {
+  local name="$1"
+  local value="$2"
+  printf '%s\n' "$value" > "$report_dir/$name"
+}
+
+find_output() {
+  local candidate
+  candidate="$run_dir/$expected_output"
+  if [[ -f "$candidate" && ! -L "$candidate" ]] \
+      && [[ "$(stat --format='%s' -- "$candidate")" == "$expected_size" ]]; then
+    printf '%s\n' "$expected_output"
+    return 0
+  fi
+  return 1
+}
+
+readonly start_epoch="$(date +%s)"
+write_report_value started_epoch "$start_epoch"
+cd "$run_dir"
+mapfile -t executable_arguments < "$run_dir/$arguments_name"
+
+set +e
+/usr/bin/time --verbose --output="$report_dir/time.txt" \
+  timeout --signal=TERM --kill-after=60 "$time_limit_seconds" \
+  chroot --userspec=65532:65532 --groups= \
+    /opt/contestant-root /bin/exec-once /work/run \
+    "./$executable_name" "${executable_arguments[@]}" \
+  >"$report_dir/stdout.log" 2>"$report_dir/stderr.log" &
+readonly timed_pid=$!
+set -e
+
+peak_disk_bytes=0
+peak_apparent_bytes=0
+resource_violation=none
+
+while kill -0 "$timed_pid" 2>/dev/null; do
+  current_disk_bytes="$(du --summarize --block-size=1 /work 2>/dev/null | awk '{print $1}')"
+  current_apparent_bytes="$(du --summarize --bytes /work 2>/dev/null | awk '{print $1}')"
+  current_disk_bytes="${current_disk_bytes:-0}"
+  current_apparent_bytes="${current_apparent_bytes:-0}"
+
+  if (( current_disk_bytes > peak_disk_bytes )); then
+    peak_disk_bytes="$current_disk_bytes"
+  fi
+  if (( current_apparent_bytes > peak_apparent_bytes )); then
+    peak_apparent_bytes="$current_apparent_bytes"
+  fi
+
+  if (( current_disk_bytes > disk_limit_bytes )); then
+    resource_violation=disk
+    kill -TERM "$timed_pid" 2>/dev/null || true
+    sleep 2
+    kill -KILL "$timed_pid" 2>/dev/null || true
+    break
+  fi
+
+  sleep "$disk_poll_seconds"
+done
+
+set +e
+wait "$timed_pid"
+executable_exit_code=$?
+set -e
+
+readonly finish_epoch="$(date +%s)"
+readonly elapsed_seconds="$((finish_epoch - start_epoch))"
+peak_rss_kib="$(awk -F: '/Maximum resident set size/ {
+  gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2
+}' "$report_dir/time.txt")"
+peak_rss_kib="${peak_rss_kib:-0}"
+[[ "$peak_rss_kib" =~ ^[0-9]+$ ]] || peak_rss_kib=0
+readonly peak_rss_bytes="$((peak_rss_kib * 1024))"
+
+if [[ "$resource_violation" == none && "$executable_exit_code" == 124 ]]; then
+  resource_violation=time
+elif [[ "$resource_violation" == none \
+    && "$peak_rss_bytes" -gt "$memory_limit_bytes" ]]; then
+  resource_violation=memory
+fi
+
+final_disk_bytes="$(du --summarize --block-size=1 /work 2>/dev/null | awk '{print $1}')"
+final_apparent_bytes="$(du --summarize --bytes /work 2>/dev/null | awk '{print $1}')"
+final_disk_bytes="${final_disk_bytes:-0}"
+final_apparent_bytes="${final_apparent_bytes:-0}"
+if (( final_disk_bytes > peak_disk_bytes )); then
+  peak_disk_bytes="$final_disk_bytes"
+fi
+if (( final_apparent_bytes > peak_apparent_bytes )); then
+  peak_apparent_bytes="$final_apparent_bytes"
+fi
+
+write_report_value executable_exit_code "$executable_exit_code"
+write_report_value elapsed_seconds "$elapsed_seconds"
+write_report_value finished_epoch "$finish_epoch"
+write_report_value peak_disk_bytes "$peak_disk_bytes"
+write_report_value peak_apparent_bytes "$peak_apparent_bytes"
+write_report_value peak_rss_kib "$peak_rss_kib"
+write_report_value peak_rss_bytes "$peak_rss_bytes"
+write_report_value resource_violation "$resource_violation"
+
+if output_name="$(find_output)"; then
+  write_report_value output_name "$output_name"
+  stat --format='%s' -- "$run_dir/$output_name" > "$report_dir/output.bytes"
+  sha256sum -- "$run_dir/$output_name" | awk '{print $1}' > "$report_dir/output.sha256"
+  write_report_value output_status found
+else
+  write_report_value output_status missing_or_ambiguous
+fi
+
+chmod 0444 "$report_dir"/*
+chmod 0555 "$report_dir"
+
+exit "$executable_exit_code"

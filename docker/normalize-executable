@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+export LC_ALL=C
+umask 022
+
+readonly artifact=/submission/artifact
+readonly output_name="${OUTPUT_NAME:?OUTPUT_NAME is required}"
+readonly artifact_format="${ARTIFACT_FORMAT:?ARTIFACT_FORMAT is required}"
+
+[[ "$output_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
+  echo "OUTPUT_NAME must be a plain filename." >&2
+  exit 2
+}
+[[ -f "$artifact" && ! -L "$artifact" ]] || {
+  echo "The input artifact is missing or invalid." >&2
+  exit 2
+}
+[[ -d /output && ! -L /output ]] || exit 2
+[[ -z "$(find -P /output -mindepth 1 -print -quit)" ]] || {
+  echo "The normalization output directory must be empty." >&2
+  exit 2
+}
+
+case "$artifact_format" in
+  executable)
+    cp --reflink=never -- "$artifact" "/output/$output_name"
+    ;;
+  upx)
+    /opt/upx/upx-5.1.1-amd64_linux/upx --test -- "$artifact"
+    /opt/upx/upx-5.1.1-amd64_linux/upx \
+      --decompress --output="/output/$output_name" -- "$artifact"
+    ;;
+  upx-overlay)
+    artifact_bytes="$(stat --format='%s' "$artifact")"
+    packed_prefix=/output/.packed-prefix
+    unpacked_prefix=/output/.unpacked-prefix
+    selected_end=0
+    while IFS=: read -r magic_offset _; do
+      candidate_end="$((magic_offset + 36))"
+      (( candidate_end <= artifact_bytes && candidate_end <= 67108864 )) \
+        || continue
+      head --bytes="$candidate_end" -- "$artifact" > "$packed_prefix"
+      if /opt/upx/upx-5.1.1-amd64_linux/upx --test -- "$packed_prefix" \
+          >/dev/null 2>&1; then
+        selected_end="$candidate_end"
+        break
+      fi
+    done < <(LC_ALL=C grep --byte-offset --only-matching \
+      --binary-files=text 'UPX!' "$artifact")
+    (( selected_end > 0 )) || {
+      echo "No valid UPX executable prefix was found before the overlay." >&2
+      exit 2
+    }
+    /opt/upx/upx-5.1.1-amd64_linux/upx --decompress \
+      --output="$unpacked_prefix" -- "$packed_prefix"
+    cp --reflink=never -- "$unpacked_prefix" "/output/$output_name"
+    tail --bytes="+$((selected_end + 1))" -- "$artifact" \
+      >> "/output/$output_name"
+    rm -- "$packed_prefix" "$unpacked_prefix"
+    ;;
+  *)
+    echo "Unsupported ARTIFACT_FORMAT: $artifact_format" >&2
+    exit 2
+    ;;
+esac
+
+[[ -f "/output/$output_name" && ! -L "/output/$output_name" ]] || exit 2
+chmod 0555 "/output/$output_name"
