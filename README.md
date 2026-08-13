@@ -8,6 +8,45 @@ hashes, and proposed score for human review.
 
 Entrants should follow [ENTRANT_INSTRUCTIONS.md](ENTRANT_INSTRUCTIONS.md).
 
+## Clone with Git LFS artifacts
+
+The benchmark, normalization tool, example source, and example executable are
+stored with Git LFS. After cloning, make sure the checkout contains the actual
+objects rather than small LFS pointer files:
+
+```bash
+sudo apt-get install git-lfs
+git lfs install
+git lfs pull
+```
+
+`judge.sh` checks this before building Docker and prints a narrower
+`git lfs pull --include=...` command if any required object is still only a
+pointer. It also verifies the pinned SHA-256 digests of the Linux Geekbench and
+UPX archives.
+
+## Host Docker access
+
+Run the judge as an ordinary user that can access the Docker daemon. Test this
+before starting a long judgment:
+
+```bash
+docker info
+```
+
+On Ubuntu, if this reports permission denied for `/var/run/docker.sock`, add the
+judging account to the Docker group once:
+
+```bash
+sudo usermod -aG docker "$USER"
+```
+
+Log out and back in so the new group membership takes effect, or run
+`newgrp docker`, and then repeat `docker info`. Do not run `judge.sh` with
+`sudo`, and do not make the socket world-writable. The Docker group grants
+root-level privileges on the host, so use a disposable, fully patched machine
+or VM without credentials or unrelated data when judging untrusted entries.
+
 ## Run a complete Linux judgment
 
 From the repository root:

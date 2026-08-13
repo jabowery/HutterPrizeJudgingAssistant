@@ -55,6 +55,97 @@ EOF
 }
 
 die() { echo "error: $*" >&2; exit 2; }
+require_docker_daemon() {
+  local diagnostic current_user
+  command -v docker >/dev/null \
+    || die "Docker is not installed or is not in PATH"
+  if diagnostic="$(docker info --format '{{.ServerVersion}}' 2>&1)"; then
+    return
+  fi
+
+  current_user="${USER:-$(id -un)}"
+  if [[ "$diagnostic" == *"permission denied"* \
+      || "$diagnostic" == *"Permission denied"* ]]; then
+    cat >&2 <<EOF
+error: user $current_user cannot access the Docker daemon socket.
+
+On Ubuntu, grant this account Docker access once:
+  sudo usermod -aG docker $current_user
+
+Then log out and back in (or run: newgrp docker), and verify:
+  docker info
+
+Do not run judge.sh with sudo and do not make /var/run/docker.sock
+world-writable. Membership in the docker group grants root-level host access;
+use a disposable judging machine or VM for untrusted entries.
+EOF
+  else
+    printf 'error: Docker daemon is unavailable:\n%s\n' "$diagnostic" >&2
+  fi
+  exit 2
+}
+require_materialized_assets() {
+  local asset first_line relative include actual_sha256
+  local -a assets=(
+    "$script_dir/Geekbench-5.5.1-Linux.tar.gz"
+    "$script_dir/UPX-5.1.1-amd64_linux.tar.xz"
+    "$submission_entry_dir/$HP_SOURCE_PACKAGE"
+    "$submission_entry_dir/$HP_ARCHIVE"
+  )
+  local -a pointers=() includes=()
+  if [[ "$HP_ENTRY_FORMAT" == separate-decompressor ]]; then
+    assets+=("$submission_entry_dir/$HP_DECOMPRESSOR")
+  fi
+
+  for asset in "${assets[@]}"; do
+    [[ -f "$asset" && ! -L "$asset" ]] \
+      || die "required artifact is missing or is not a regular file: $asset"
+    first_line=
+    if (( $(stat --format='%s' "$asset") <= 1024 )); then
+      IFS= read -r first_line < "$asset" || true
+    fi
+    if [[ "$first_line" == 'version https://git-lfs.github.com/spec/v1' ]]; then
+      if [[ "$asset" == "$script_dir/"* ]]; then
+        relative="${asset#"$script_dir/"}"
+        pointers+=("$relative")
+        includes+=("$relative")
+      else
+        pointers+=("$asset")
+      fi
+    fi
+  done
+
+  if (( ${#pointers[@]} > 0 )); then
+    echo "error: required Git LFS objects have not been downloaded:" >&2
+    printf '  %s\n' "${pointers[@]}" >&2
+    cat >&2 <<'EOF'
+
+On Ubuntu, install and initialize Git LFS if necessary:
+  sudo apt-get update
+  sudo apt-get install git-lfs
+  git lfs install
+EOF
+    if (( ${#includes[@]} > 0 )); then
+      include="$(IFS=,; echo "${includes[*]}")"
+      printf '\nThen, from the repository root, download the required objects:\n' >&2
+      printf '  git lfs pull --include="%s"\n' "$include" >&2
+    fi
+    cat >&2 <<'EOF'
+
+Verify that the reported paths are now full files, then rerun judge.sh.
+EOF
+    exit 2
+  fi
+
+  actual_sha256="$(sha256sum "$script_dir/Geekbench-5.5.1-Linux.tar.gz" \
+    | awk '{print $1}')"
+  [[ "$actual_sha256" == 32037e55c3dc8f360fe16b7fbb188d31387ea75980e48d8cf028330e3239c404 ]] \
+    || die "Geekbench-5.5.1-Linux.tar.gz failed its pinned SHA-256 check"
+  actual_sha256="$(sha256sum "$script_dir/UPX-5.1.1-amd64_linux.tar.xz" \
+    | awk '{print $1}')"
+  [[ "$actual_sha256" == 1ff660454227861e00772f743f66b900072116b9dc24f6ee28b97cce88a7828a ]] \
+    || die "UPX-5.1.1-amd64_linux.tar.xz failed its pinned SHA-256 check"
+}
 cleanup_staged_entry() {
   if [[ -n "$active_stage_root" && -d "$active_stage_root" ]]; then
     docker run --rm --network none \
@@ -176,6 +267,9 @@ if [[ "$HP_ENTRY_FORMAT" == separate-decompressor ]]; then
       && ! -L "$submission_entry_dir/$HP_DECOMPRESSOR" ]] \
     || die "entry is missing declared submitted DECOMPRESSOR $HP_DECOMPRESSOR"
 fi
+
+require_materialized_assets
+require_docker_daemon
 
 mkdir -p -- "$results_path"
 results_path="$(realpath -- "$results_path")"

@@ -138,6 +138,13 @@ make_entry "$test_dir/Entries/ParallelFail" submitted generated tar slow fail
 make_entry "$test_dir/Entries/HelperEscape" identical identical tar success helper
 make_entry "$test_dir/Entries/BadManifest" identical identical tar \
   success success invalid
+cp -a -- "$test_dir/Entries/Identical" "$test_dir/Entries/LfsPointer"
+rm -- "$test_dir/Entries/LfsPointer/archive9"
+cat > "$test_dir/Entries/LfsPointer/archive9" <<'EOF'
+version https://git-lfs.github.com/spec/v1
+oid sha256:0000000000000000000000000000000000000000000000000000000000000000
+size 59
+EOF
 
 separate_root="$test_dir/Entries/Separate/package-root"
 mkdir "$separate_root"
@@ -188,6 +195,48 @@ chmod 0555 "$test_dir/Entries/Separate/decomp9" \
 tar --create --gzip --file "$test_dir/Entries/Separate/submission.tar.gz" \
   --directory "$test_dir/Entries/Separate" package-root
 rm -rf -- "$separate_root"
+
+# Fail before creating a results run or printing a build banner when the
+# current host account cannot access the Docker daemon.
+mkdir "$test_dir/fake-docker-bin"
+cat > "$test_dir/fake-docker-bin/docker" <<'EOF'
+#!/bin/sh
+echo 'permission denied while trying to connect to the docker API at unix:///var/run/docker.sock' >&2
+exit 1
+EOF
+chmod 0555 "$test_dir/fake-docker-bin/docker"
+set +e
+PATH="$test_dir/fake-docker-bin:$PATH" "$project_dir/judge.sh" \
+  --geekbench-score 8400000 \
+  --expected-size "$fixture_size" \
+  --work-root "$test_dir/work" \
+  --results "$test_dir/results-DockerDenied" \
+  "$test_dir/Entries/Identical" "$test_dir/enwik9" \
+  >"$test_dir/docker-denied.stdout" 2>"$test_dir/docker-denied.stderr"
+docker_denied_exit=$?
+set -e
+(( docker_denied_exit == 2 ))
+grep -q 'cannot access the Docker daemon socket' "$test_dir/docker-denied.stderr"
+grep -q 'sudo usermod -aG docker' "$test_dir/docker-denied.stderr"
+! grep -q 'Building the common judge image' "$test_dir/docker-denied.stderr"
+[[ ! -e "$test_dir/results-DockerDenied" ]]
+
+set +e
+"$project_dir/judge.sh" \
+  --geekbench-score 8400000 \
+  --expected-size "$fixture_size" \
+  --work-root "$test_dir/work" \
+  --results "$test_dir/results-LfsPointer" \
+  "$test_dir/Entries/LfsPointer" "$test_dir/enwik9" \
+  >"$test_dir/lfs-pointer.stdout" 2>"$test_dir/lfs-pointer.stderr"
+lfs_pointer_exit=$?
+set -e
+(( lfs_pointer_exit == 2 ))
+grep -q 'required Git LFS objects have not been downloaded' \
+  "$test_dir/lfs-pointer.stderr"
+grep -q 'git lfs install' "$test_dir/lfs-pointer.stderr"
+! grep -q 'Building the common judge image' "$test_dir/lfs-pointer.stderr"
+[[ ! -e "$test_dir/results-LfsPointer" ]]
 
 run_full() {
   local name="$1"
