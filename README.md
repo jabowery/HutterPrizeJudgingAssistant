@@ -1,7 +1,7 @@
 # Hutter Prize Docker judging system
 
-`judge.sh` automates the reproducible technical part of judging a Hutter Prize
-submission. The authoritative rules remain the
+`judging_assistance.sh` automates the reproducible technical part of judging a
+Hutter Prize submission. The authoritative rules remain the
 [Hutter Prize detailed rules](https://www.hutter1.net/prize/hrules.htm); this
 repository records the artifacts, isolation boundaries, resource measurements,
 hashes, and proposed score for human review.
@@ -11,15 +11,16 @@ Entrants should follow [ENTRANT_INSTRUCTIONS.md](ENTRANT_INSTRUCTIONS.md).
 ## Terminology
 
 In this documentation, a **judge** is a human Hutter Prize official. Automated
-components are called `judge.sh`, the judging system, the orchestrator, or a
-worker. The established filename `judge.sh` does not denote a human actor, and
-the documentation does not assign human decisions or obligations to it.
+components are called `judging_assistance.sh`, the judging system, the
+orchestrator, or a worker. The documentation does not assign human decisions or
+obligations to software.
 
 ## Automatic Git LFS materialization
 
 The benchmark, normalization tool, example source, and example executable are
-stored with Git LFS. Invoke `judge.sh` normally after cloning. If required files
-are still small LFS pointers, `judge.sh` automatically:
+stored with Git LFS. Invoke `judging_assistance.sh` normally after cloning. If
+required files are still small LFS pointers, `judging_assistance.sh`
+automatically:
 
 - installs Git LFS through the trusted
   [`install-host-dependencies.sh`](install-host-dependencies.sh) helper, with
@@ -33,13 +34,15 @@ auditable root/network phase and installs only the `git-lfs` Ubuntu package.
 
 ## Host Docker access
 
-Invoke `judge.sh` as your ordinary user. It checks Docker access before creating
-a results run or starting a build. If that account cannot open the Docker daemon
-socket, the trusted host orchestrator re-executes itself with `sudo`, using the
-customary password prompt:
+Invoke `judging_assistance.sh` as your ordinary user. It checks Docker access
+before creating a results run or starting a build. If that account cannot open
+the Docker daemon socket, the trusted host orchestrator re-executes itself with
+`sudo`, using the customary password prompt:
 
 ```bash
-./judge.sh --work-root /mnt/large-disk/HutterPrizeJudging Entries/NAME ./enwik9
+./judging_assistance.sh \
+  --work-root /mnt/large-disk/HutterPrizeJudging \
+  Entries/NAME ./enwik9
 ```
 
 The elevated host process returns the completed results tree to the invoking
@@ -55,7 +58,7 @@ when judging untrusted entries.
 From the repository root:
 
 ```bash
-./judge.sh \
+./judging_assistance.sh \
   --work-root /mnt/large-disk/HutterPrizeJudging \
   Entries/NAME ./enwik9
 ```
@@ -179,7 +182,7 @@ does not let an entrant declare its own score.
 ```bash
 ./tests/test-terminology.sh
 ./tests/test-qualify-archive.sh
-./tests/test-judge.sh
+./tests/test-judging-assistance.sh
 ```
 
 The terminology test enforces the human/software distinction above. The

@@ -26,7 +26,7 @@ run_results=""
 
 usage() {
   cat <<'EOF'
-Usage: ./judge.sh [OPTIONS] ENTRY_DIR [ENWIK9]
+Usage: ./judging_assistance.sh [OPTIONS] ENTRY_DIR [ENWIK9]
 
 Complete standardized technical judging:
   1. calibrate this Docker environment with Geekbench 5,
@@ -73,8 +73,8 @@ require_docker_daemon() {
       command -v sudo >/dev/null \
         || die "Docker access requires root, but sudo is not installed or is not in PATH"
       echo "Docker daemon access requires elevation; invoking sudo..." >&2
-      exec sudo -- "$script_dir/judge.sh" "${original_argv[@]}"
-      die "sudo could not re-execute judge.sh"
+      exec sudo -- "$script_dir/judging_assistance.sh" "${original_argv[@]}"
+      die "sudo could not re-execute judging_assistance.sh"
     fi
     printf 'error: root cannot access the Docker daemon:\n%s\n' "$diagnostic" >&2
   else

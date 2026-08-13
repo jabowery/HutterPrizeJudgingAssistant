@@ -219,7 +219,7 @@ EOF
 chmod 0555 "$test_dir/fake-docker-bin/docker" "$test_dir/fake-docker-bin/sudo"
 set +e
 FAKE_SUDO_LOG="$test_dir/fake-sudo.log" \
-  PATH="$test_dir/fake-docker-bin:$PATH" "$project_dir/judge.sh" \
+  PATH="$test_dir/fake-docker-bin:$PATH" "$project_dir/judging_assistance.sh" \
   --geekbench-score 8400000 \
   --expected-size "$fixture_size" \
   --work-root "$test_dir/work" \
@@ -238,7 +238,7 @@ else
     "$test_dir/docker-denied.stderr"
   mapfile -t sudo_arguments < "$test_dir/fake-sudo.log"
   [[ "${sudo_arguments[0]}" == -- ]]
-  [[ "${sudo_arguments[1]}" == "$project_dir/judge.sh" ]]
+  [[ "${sudo_arguments[1]}" == "$project_dir/judging_assistance.sh" ]]
   [[ "${sudo_arguments[2]}" == --geekbench-score ]]
   [[ "${sudo_arguments[3]}" == 8400000 ]]
 fi
@@ -246,7 +246,7 @@ fi
 [[ ! -e "$test_dir/results-DockerDenied" ]]
 
 set +e
-"$project_dir/judge.sh" \
+"$project_dir/judging_assistance.sh" \
   --geekbench-score 8400000 \
   --expected-size "$fixture_size" \
   --work-root "$test_dir/work" \
@@ -311,7 +311,7 @@ FAKE_LFS_INSTALLED="$test_dir/fake-lfs-installed" \
   FAKE_LFS_SUDO_LOG="$test_dir/fake-lfs-sudo.log" \
   FAKE_LFS_SOURCE="$test_dir/materialized-archive9" \
   FAKE_LFS_TARGET="$lfs_repo_entry/archive9" \
-  PATH="$test_dir/fake-lfs-bin:$PATH" "$project_dir/judge.sh" \
+  PATH="$test_dir/fake-lfs-bin:$PATH" "$project_dir/judging_assistance.sh" \
   --geekbench-score 8400000 \
   --expected-size "$fixture_size" \
   --work-root "$test_dir/work" \
@@ -339,7 +339,7 @@ lfs_repo_entry=""
 run_full() {
   local name="$1"
   shift
-  "$project_dir/judge.sh" \
+  "$project_dir/judging_assistance.sh" \
     --geekbench-score 8400000 \
     --expected-size "$fixture_size" \
     --memory-limit-bytes 134217728 \
@@ -387,7 +387,7 @@ grep -q '^rebuilt_decompressor_identical=yes$' "$separate_final"
 
 set +e
 timeout --signal=TERM --kill-after=5 30 \
-  "$project_dir/judge.sh" \
+  "$project_dir/judging_assistance.sh" \
     --geekbench-score 840000 \
     --expected-size "$fixture_size" \
     --memory-limit-bytes 134217728 \

@@ -7,7 +7,7 @@ violations=""
 while IFS= read -r occurrence; do
   lowercase="${occurrence,,}"
   case "$lowercase" in
-    *judge.sh*|*"human judge"*|*"human hutter prize official"*) ;;
+    *"human judge"*|*"human hutter prize official"*) ;;
     *) violations+="$occurrence"$'\n' ;;
   esac
 done < <(
@@ -15,6 +15,11 @@ done < <(
     ':(exclude)Entries/**' \
     ':(exclude)tests/test-terminology.sh' || true
 )
+
+while IFS= read -r path; do
+  lowercase="${path,,}"
+  [[ "$lowercase" != *judge* ]] || violations+="$path"$'\n'
+done < <(git -C "$project_dir" ls-files)
 
 if [[ -n "$violations" ]]; then
   echo "error: software described as a judge; reserve that term for a human official:" >&2

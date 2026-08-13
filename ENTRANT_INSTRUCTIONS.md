@@ -1,7 +1,7 @@
 # Entrant instructions
 
 These instructions define the mechanical submission contract used by
-`judge.sh`. They use the illustrative filenames from the
+`judging_assistance.sh`. They use the illustrative filenames from the
 [official detailed rules](https://www.hutter1.net/prize/hrules.htm), while
 allowing different real filenames through explicit `entry.env` aliases.
 

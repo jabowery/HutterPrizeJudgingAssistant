@@ -2,7 +2,8 @@
 Create a docker script that automates Hutter Prize judging given an Entries/ subdirectory.
 
 In documentation, reserve "judge" for a human Hutter Prize official. Refer to
-software as `judge.sh`, the judging system, the orchestrator, or a worker.
+software as `judging_assistance.sh`, the judging system, the orchestrator, or a
+worker.
 
 The detailed judging rules are at:
 http://prize.hutter1.net/hrules.htm
