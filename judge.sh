@@ -81,6 +81,24 @@ require_docker_daemon() {
   fi
   exit 2
 }
+ensure_git_lfs() {
+  command -v git >/dev/null \
+    || die "Git is not installed or is not in PATH"
+  if git lfs version >/dev/null 2>&1; then
+    return
+  fi
+
+  echo "Git LFS is required; installing it with the trusted host helper..." >&2
+  if (( EUID == 0 )); then
+    "$script_dir/install-host-dependencies.sh"
+  else
+    command -v sudo >/dev/null \
+      || die "Git LFS installation requires root, but sudo is not installed or is not in PATH"
+    sudo -- "$script_dir/install-host-dependencies.sh"
+  fi
+  git lfs version >/dev/null 2>&1 \
+    || die "Git LFS installation completed but 'git lfs' is unavailable"
+}
 require_materialized_assets() {
   local asset first_line relative include actual_sha256
   local -a assets=(
@@ -113,25 +131,28 @@ require_materialized_assets() {
   done
 
   if (( ${#pointers[@]} > 0 )); then
-    echo "error: required Git LFS objects have not been downloaded:" >&2
-    printf '  %s\n' "${pointers[@]}" >&2
-    cat >&2 <<'EOF'
-
-On Ubuntu, install and initialize Git LFS if necessary:
-  sudo apt-get update
-  sudo apt-get install git-lfs
-  git lfs install
-EOF
-    if (( ${#includes[@]} > 0 )); then
-      include="$(IFS=,; echo "${includes[*]}")"
-      printf '\nThen, from the repository root, download the required objects:\n' >&2
-      printf '  git lfs pull --include="%s"\n' "$include" >&2
+    if (( ${#pointers[@]} != ${#includes[@]} )); then
+      echo "error: required Git LFS pointers outside the judge repository cannot be fetched automatically:" >&2
+      for asset in "${pointers[@]}"; do
+        [[ "$asset" == /* ]] && printf '  %s\n' "$asset" >&2
+      done
+      exit 2
     fi
-    cat >&2 <<'EOF'
 
-Verify that the reported paths are now full files, then rerun judge.sh.
-EOF
-    exit 2
+    ensure_git_lfs
+    include="$(IFS=,; echo "${includes[*]}")"
+    echo "Materializing required Git LFS objects..." >&2
+    git -C "$script_dir" lfs install --local >/dev/null
+    git -C "$script_dir" lfs pull --include="$include"
+
+    for asset in "${assets[@]}"; do
+      first_line=
+      if (( $(stat --format='%s' "$asset") <= 1024 )); then
+        IFS= read -r first_line < "$asset" || true
+      fi
+      [[ "$first_line" != 'version https://git-lfs.github.com/spec/v1' ]] \
+        || die "Git LFS did not materialize required artifact: $asset"
+    done
   fi
 
   actual_sha256="$(sha256sum "$script_dir/Geekbench-5.5.1-Linux.tar.gz" \

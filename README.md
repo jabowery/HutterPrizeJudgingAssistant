@@ -8,22 +8,21 @@ hashes, and proposed score for human review.
 
 Entrants should follow [ENTRANT_INSTRUCTIONS.md](ENTRANT_INSTRUCTIONS.md).
 
-## Clone with Git LFS artifacts
+## Automatic Git LFS materialization
 
 The benchmark, normalization tool, example source, and example executable are
-stored with Git LFS. After cloning, make sure the checkout contains the actual
-objects rather than small LFS pointer files:
+stored with Git LFS. Invoke `judge.sh` normally after cloning. If required files
+are still small LFS pointers, the judge automatically:
 
-```bash
-sudo apt-get install git-lfs
-git lfs install
-git lfs pull
-```
+- installs Git LFS through the trusted
+  [`install-host-dependencies.sh`](install-host-dependencies.sh) helper, with
+  the customary `sudo` prompt, if necessary; and
+- downloads only the required LFS objects as the invoking user.
 
-`judge.sh` checks this before building Docker and prints a narrower
-`git lfs pull --include=...` command if any required object is still only a
-pointer. It also verifies the pinned SHA-256 digests of the Linux Geekbench and
-UPX archives.
+No preliminary Git LFS command is required. The judge verifies that downloads
+were materialized and checks the pinned SHA-256 digests of the Linux Geekbench
+and UPX archives before building Docker. The helper is a separate, auditable
+root/network phase and installs only the `git-lfs` Ubuntu package.
 
 ## Host Docker access
 
