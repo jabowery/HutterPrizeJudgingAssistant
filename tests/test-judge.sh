@@ -242,7 +242,7 @@ else
   [[ "${sudo_arguments[2]}" == --geekbench-score ]]
   [[ "${sudo_arguments[3]}" == 8400000 ]]
 fi
-! grep -q 'Building the common judge image' "$test_dir/docker-denied.stderr"
+! grep -q 'Building the common judging image' "$test_dir/docker-denied.stderr"
 [[ ! -e "$test_dir/results-DockerDenied" ]]
 
 set +e
@@ -256,9 +256,9 @@ set +e
 lfs_pointer_exit=$?
 set -e
 (( lfs_pointer_exit == 2 ))
-grep -q 'Git LFS pointers outside the judge repository cannot be fetched automatically' \
+grep -q 'Git LFS pointers outside the judging repository cannot be fetched automatically' \
   "$test_dir/lfs-pointer.stderr"
-! grep -q 'Building the common judge image' "$test_dir/lfs-pointer.stderr"
+! grep -q 'Building the common judging image' "$test_dir/lfs-pointer.stderr"
 [[ ! -e "$test_dir/results-LfsPointer" ]]
 
 # Materialize an in-repository pointer without manual intervention. The fake
@@ -355,7 +355,7 @@ run_full() {
 run_full Identical
 identical_final="$(find "$test_dir/results-Identical" -name final.env -type f -print -quit)"
 grep -q '^technical_verdict=PASS$' "$identical_final"
-grep -q '^judge_jobs=2$' "$identical_final"
+grep -q '^job_slots=2$' "$identical_final"
 grep -q '^execution_mode=parallel$' "$identical_final"
 grep -q '^archives_identical=yes$' "$identical_final"
 grep -q '^second_decompression=skipped_identical$' "$identical_final"
@@ -371,7 +371,7 @@ grep -q '^command_line_bytes=22$' "$identical_final"
 run_full Different --serial
 different_final="$(find "$test_dir/results-Different" -name final.env -type f -print -quit)"
 grep -q '^technical_verdict=PASS$' "$different_final"
-grep -q '^judge_jobs=1$' "$different_final"
+grep -q '^job_slots=1$' "$different_final"
 grep -q '^execution_mode=serial$' "$different_final"
 grep -q '^archives_identical=no$' "$different_final"
 grep -q '^second_decompression=pass$' "$different_final"

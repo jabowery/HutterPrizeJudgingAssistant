@@ -4,7 +4,7 @@ set -Eeuo pipefail
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly -a original_argv=("$@")
 source "$script_dir/lib/entry-env.sh"
-image=hutter-prize-judge:local
+image=hutter-prize-judging:local
 entry_dir=""
 reference_path="$script_dir/enwik9"
 results_path="$script_dir/Results"
@@ -15,7 +15,7 @@ cgroup_memory_headroom_bytes=1073741824
 disk_limit_bytes=100000000000
 disk_poll_seconds=10
 cpu_limit=1
-judge_jobs=2
+job_slots=2
 record_size=110793128
 expected_size=1000000000
 active_stage_root=""
@@ -36,7 +36,8 @@ Complete standardized technical judging:
   5. run build.sh offline to produce declared executable artifact(s),
   6. invoke the rebuilt compressor in a new container with its declared names
      offline under the formal resource limits,
-  7. return and evaluate the generated archive in the judge environment, and
+  7. return and evaluate the generated archive in the host judging environment,
+     and
   8. invoke the appropriate declared decompressor in another new container
      when the evaluated artifacts are not byte-identical to those qualified.
 
@@ -44,7 +45,7 @@ Options:
   --work-root DIR            Required filesystem with at least 100 GB free
   --geekbench-score N        Reuse a score instead of calibrating
   --results DIR              Default: ./Results
-  --image NAME               Default: hutter-prize-judge:local
+  --image NAME               Default: hutter-prize-judging:local
   --memory-limit-bytes N     Formal peak-RSS limit (default: 10737418240 = 10 GiB)
   --cgroup-headroom-bytes N  Supervisor/cache allowance (default: 1073741824)
   --disk-limit-bytes N       Default: 100000000000
@@ -132,7 +133,7 @@ require_materialized_assets() {
 
   if (( ${#pointers[@]} > 0 )); then
     if (( ${#pointers[@]} != ${#includes[@]} )); then
-      echo "error: required Git LFS pointers outside the judge repository cannot be fetched automatically:" >&2
+      echo "error: required Git LFS pointers outside the judging repository cannot be fetched automatically:" >&2
       for asset in "${pointers[@]}"; do
         [[ "$asset" == /* ]] && printf '  %s\n' "$asset" >&2
       done
@@ -251,8 +252,8 @@ while (( $# > 0 )); do
     --disk-limit-bytes) (( $# >= 2 )) || die "$1 requires a value"; disk_limit_bytes="$2"; shift 2 ;;
     --disk-poll-seconds) (( $# >= 2 )) || die "$1 requires a value"; disk_poll_seconds="$2"; shift 2 ;;
     --cpus) (( $# >= 2 )) || die "$1 requires a value"; cpu_limit="$2"; shift 2 ;;
-    --jobs) (( $# >= 2 )) || die "$1 requires a value"; judge_jobs="$2"; shift 2 ;;
-    --serial) judge_jobs=1; shift ;;
+    --jobs) (( $# >= 2 )) || die "$1 requires a value"; job_slots="$2"; shift 2 ;;
+    --serial) job_slots=1; shift ;;
     --record-size) (( $# >= 2 )) || die "$1 requires a value"; record_size="$2"; shift 2 ;;
     --expected-size) (( $# >= 2 )) || die "$1 requires a value"; expected_size="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -275,7 +276,7 @@ readonly cgroup_memory_ceiling_bytes="$((memory_limit_bytes + cgroup_memory_head
 [[ "$cpu_limit" =~ ^[0-9]+([.][0-9]+)?$ ]] \
   && awk -v n="$cpu_limit" 'BEGIN { exit !(n > 0) }' \
   || die "cpus must be positive"
-[[ "$judge_jobs" == 1 || "$judge_jobs" == 2 ]] \
+[[ "$job_slots" == 1 || "$job_slots" == 2 ]] \
   || die "jobs must be 1 or 2"
 [[ -z "$geekbench_score" || "$geekbench_score" =~ ^[1-9][0-9]*$ ]] \
   || die "invalid Geekbench score"
@@ -315,7 +316,7 @@ readonly run_results
 mkdir -p -- "$run_results/generated"
 qualification_container_file="$run_results/qualification-container-id"
 
-echo "Building the common judge image..." >&2
+echo "Building the common judging image..." >&2
 docker build --tag "$image" "$script_dir" >&2 \
   || stage_fail common_image "Docker image build failed"
 
@@ -396,7 +397,7 @@ else
 fi
 qualification_command+=("$submitted_execution_dir" "$reference_path")
 
-if (( judge_jobs == 2 )); then
+if (( job_slots == 2 )); then
   execution_mode=parallel
   echo "[$entry_name] starting submitted decompression qualification in parallel" >&2
   "${qualification_command[@]}" &
@@ -458,7 +459,7 @@ if ! "$script_dir/compress-entry.sh" \
   stage_fail compression "rebuilt compressor failed"
 fi
 
-if (( judge_jobs == 2 )); then
+if (( job_slots == 2 )); then
   echo "[$entry_name] compression finished; waiting for submitted qualification" >&2
   if wait "$qualification_pid"; then
     qualification_pid=""
@@ -560,7 +561,7 @@ fi
   echo "cgroup_memory_headroom_bytes=$cgroup_memory_headroom_bytes"
   echo "cgroup_memory_ceiling_bytes=$cgroup_memory_ceiling_bytes"
   echo "disk_limit_bytes=$disk_limit_bytes"
-  echo "judge_jobs=$judge_jobs"
+  echo "job_slots=$job_slots"
   echo "execution_mode=$execution_mode"
   echo "entry_format=$HP_ENTRY_FORMAT"
   echo "execution_platform=$HP_EXECUTION_PLATFORM"
@@ -581,7 +582,7 @@ fi
   echo "previous_record_bytes=$record_size"
   echo "one_percent_threshold_bytes=$threshold_bytes"
   echo "improvement_percent=$improvement_percent"
-  echo "judge_image_id=$(docker image inspect "$image" --format '{{.Id}}')"
+  echo "judging_image_id=$(docker image inspect "$image" --format '{{.Id}}')"
 } > "$run_results/final.env"
 
 {
@@ -602,6 +603,6 @@ fi
   echo "RAM peak-RSS limit: $memory_limit_bytes bytes"
   echo "Cgroup ceiling: $cgroup_memory_ceiling_bytes bytes"
   echo "Disk: $disk_limit_bytes bytes"
-  echo "Execution mode: $execution_mode ($judge_jobs long-running job slots)"
+  echo "Execution mode: $execution_mode ($job_slots long-running job slots)"
   echo "Results: $run_results"
 } | tee "$run_results/final-report.txt"

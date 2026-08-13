@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-image=hutter-prize-judge:local
+image=hutter-prize-judging:local
 results_path="$script_dir/Results"
 skip_build=false
 
@@ -93,7 +93,7 @@ if [[ ! "$score" =~ ^[1-9][0-9]*$ && -n "$result_url" ]]; then
   # manual --geekbench-score remains available if the site blocks automation.
   page_file="$result_dir/result.html"
   if curl --fail --silent --show-error --location \
-      --user-agent 'HutterPrizeJudge/1.0' "$result_url" > "$page_file"; then
+      --user-agent 'HutterPrizeJudging/1.0' "$result_url" > "$page_file"; then
     score="$(sed -nE 's/.*class="score"[^>]*>[[:space:]]*([0-9]+).*/\1/p' \
       "$page_file" | head -1)"
     score_source=official_result_page
@@ -104,7 +104,8 @@ fi
 if [[ ! "$score" =~ ^[1-9][0-9]*$ && -n "$result_url" ]]; then
   # Cloudflare may require an interactive browser even for a public result.
   # Jina Reader is a transparent text fetcher: retain its complete response and
-  # the authoritative Geekbench URL so a judge can independently cross-check T.
+  # the authoritative Geekbench URL so a human judge can independently
+  # cross-check T.
   result_proxy_url="https://r.jina.ai/$result_url"
   page_file="$result_dir/result-via-jina.md"
   if curl --fail --silent --show-error --location "$result_proxy_url" > "$page_file"; then
@@ -133,8 +134,8 @@ image_id="$(docker image inspect "$image" --format '{{.Id}}')"
   echo "judging_cpu_capacity=1"
   echo "memory_limit_bytes=10737418240"
   echo "network_access=trusted_calibration_only"
-  echo "judge_image=$image"
-  echo "judge_image_id=$image_id"
+  echo "judging_image=$image"
+  echo "judging_image_id=$image_id"
   echo "docker_server_version=$(docker version --format '{{.Server.Version}}')"
   echo "calibrated_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } > "$result_dir/calibration.env"

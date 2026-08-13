@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$script_dir/lib/entry-env.sh"
-base_image=hutter-prize-judge:local
+base_image=hutter-prize-judging:local
 entry_dir=""
 output_path=""
 decompressor_output_path=""
@@ -27,8 +27,8 @@ Options:
                       Copy the declared DECOMPRESSOR to FILE (relaxed form)
   --results DIR       Store build evidence under DIR (default: ./Results)
   --work-root DIR     Filesystem for temporary build data (default: $TMPDIR)
-  --image NAME        Base judge image (default: hutter-prize-judge:local)
-  --skip-base-build   Reuse the base judge image
+  --image NAME        Base judging image (default: hutter-prize-judging:local)
+  --skip-base-build   Reuse the base judging image
 EOF
 }
 

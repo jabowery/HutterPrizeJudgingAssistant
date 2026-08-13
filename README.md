@@ -1,4 +1,4 @@
-# Hutter Prize Docker judge
+# Hutter Prize Docker judging system
 
 `judge.sh` automates the reproducible technical part of judging a Hutter Prize
 submission. The authoritative rules remain the
@@ -8,21 +8,28 @@ hashes, and proposed score for human review.
 
 Entrants should follow [ENTRANT_INSTRUCTIONS.md](ENTRANT_INSTRUCTIONS.md).
 
+## Terminology
+
+In this documentation, a **judge** is a human Hutter Prize official. Automated
+components are called `judge.sh`, the judging system, the orchestrator, or a
+worker. The established filename `judge.sh` does not denote a human actor, and
+the documentation does not assign human decisions or obligations to it.
+
 ## Automatic Git LFS materialization
 
 The benchmark, normalization tool, example source, and example executable are
 stored with Git LFS. Invoke `judge.sh` normally after cloning. If required files
-are still small LFS pointers, the judge automatically:
+are still small LFS pointers, `judge.sh` automatically:
 
 - installs Git LFS through the trusted
   [`install-host-dependencies.sh`](install-host-dependencies.sh) helper, with
   the customary `sudo` prompt, if necessary; and
 - downloads only the required LFS objects as the invoking user.
 
-No preliminary Git LFS command is required. The judge verifies that downloads
-were materialized and checks the pinned SHA-256 digests of the Linux Geekbench
-and UPX archives before building Docker. The helper is a separate, auditable
-root/network phase and installs only the `git-lfs` Ubuntu package.
+No preliminary Git LFS command is required. The orchestrator verifies that
+downloads were materialized and checks the pinned SHA-256 digests of the Linux
+Geekbench and UPX archives before building Docker. The helper is a separate,
+auditable root/network phase and installs only the `git-lfs` Ubuntu package.
 
 ## Host Docker access
 
@@ -32,7 +39,7 @@ socket, the trusted host orchestrator re-executes itself with `sudo`, using the
 customary password prompt:
 
 ```bash
-./judge.sh --work-root /mnt/large-disk/HutterPrizeJudge Entries/NAME ./enwik9
+./judge.sh --work-root /mnt/large-disk/HutterPrizeJudging Entries/NAME ./enwik9
 ```
 
 The elevated host process returns the completed results tree to the invoking
@@ -49,7 +56,7 @@ From the repository root:
 
 ```bash
 ./judge.sh \
-  --work-root /mnt/large-disk/HutterPrizeJudge \
+  --work-root /mnt/large-disk/HutterPrizeJudging \
   Entries/NAME ./enwik9
 ```
 
@@ -68,7 +75,7 @@ than running it under an unscored compatibility layer.
 
 The entrant directory contains a strict, declarative `entry.env`, the artifacts
 it names, and the named source package. No executable name is inferred. In
-particular, the judge creates no program-name compatibility aliases.
+particular, the orchestrator creates no program-name compatibility aliases.
 
 For the normal self-extracting form, the roles are:
 
@@ -92,18 +99,19 @@ paths, and shell syntax are rejected.
 
 ## Artifact handoff and one-execution rule
 
-Every judge-initiated contestant executable invocation gets a newly created
+Every system-initiated contestant executable invocation gets a newly created
 Docker container. The container receives only the evaluated executable, its
 declared argument vector, and the declared input artifact. It has no network,
 no reference corpus, no source/build tree, and no other build outputs.
 
-Each output artifact is copied back to the host judging environment. The judge
-checks that it is a regular file and records its size, SHA-256 digest, and type
-before another container can receive it. A trusted `exec-once` monitor permits
-the one declared executable transition and rejects later `execve`/`execveat`
-calls by that program or its descendants. A wrapper therefore cannot launch an
-uncharged helper. A genuine multi-executable workflow must expose the
-intermediate artifact as a declared stage so it can be returned and evaluated.
+Each output artifact is copied back to the host judging environment. The
+orchestrator checks that it is a regular file and records its size, SHA-256
+digest, and type before another container can receive it. A trusted `exec-once`
+monitor permits the one declared executable transition and rejects later
+`execve`/`execveat` calls by that program or its descendants. A wrapper
+therefore cannot launch an uncharged helper. A genuine multi-executable
+workflow must expose the intermediate artifact as a declared stage so it can
+be returned and evaluated.
 
 Source tar/ZIP extraction, `install.sh`, and `build.sh` are separate containers.
 The source build returns only the executable role(s) declared in `entry.env`.
@@ -124,18 +132,18 @@ artifact. The pinned UPX archive has SHA-256
 
 ## Privilege and network phases
 
-The common judge image may use the network while it is built. For entrant code,
-only `install.sh` runs as root with network access, while constructing a
+The common judging image may use the network while it is built. For entrant
+code, only `install.sh` runs as root with network access, while constructing a
 dependency image. It receives no source tree. All later entrant stages are
 offline. `build.sh` runs as UID/GID 65532 in its own container; normalization
-uses trusted judge tools as UID/GID 65532; every compressor/decompressor runs
-offline as UID/GID 65532 under the formal limits.
+uses trusted orchestration tools as UID/GID 65532; every compressor/decompressor
+runs offline as UID/GID 65532 under the formal limits.
 
 Docker shares the host kernel. Namespace and capability restrictions reduce
 exposure but are not a security boundary equivalent to a virtual machine: a
 kernel or container-runtime vulnerability could escape the container. Treat
-adversarial submissions as hostile and run the whole judge on a disposable,
-fully patched machine or VM with no credentials or unrelated data.
+adversarial submissions as hostile and run the entire judging system on a
+disposable, fully patched machine or VM with no credentials or unrelated data.
 
 ## Resource accounting
 
@@ -169,13 +177,15 @@ does not let an entrant declare its own score.
 ## Tests
 
 ```bash
+./tests/test-terminology.sh
 ./tests/test-qualify-archive.sh
 ./tests/test-judge.sh
 ```
 
-The integration tests cover tar and ZIP source packages, both official entry
-forms, parallel cancellation, memory/time/content failures, hidden build
-helpers, unknown manifest fields, and rejection of a nested executable launch.
+The terminology test enforces the human/software distinction above. The
+integration tests cover tar and ZIP source packages, both official entry forms,
+parallel cancellation, memory/time/content failures, hidden build helpers,
+unknown manifest fields, and rejection of a nested executable launch.
 
 ## Example fixture status
 
@@ -187,7 +197,7 @@ named `example-source.tar.gz` to keep that distinction explicit.
 Each embedded auxiliary-data decode runs in a forked child of the declared
 compressor. This gives the cmix model fresh process state without an additional
 `execve`; no second contestant executable is launched. The stored `archive9`
-was generated by the modified source inside the pinned Ubuntu 22.04 judge
+was generated by the modified source inside the pinned Ubuntu 22.04 judging
 environment.
 
 The current rebuilt compressor and archive total 114,866,800 bytes. Including

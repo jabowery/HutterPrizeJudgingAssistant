@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-image=hutter-prize-judge:local
+image=hutter-prize-judging:local
 artifact_format=""
 output_path=""
 results_path="$script_dir/Results"
@@ -23,7 +23,7 @@ Options:
   --format FORMAT   executable, upx, or upx-overlay
   --output FILE     Required normalized executable destination
   --results DIR     Evidence directory (default: ./Results)
-  --image NAME      Judge image (default: hutter-prize-judge:local)
+  --image NAME      Judging image (default: hutter-prize-judging:local)
 EOF
 }
 

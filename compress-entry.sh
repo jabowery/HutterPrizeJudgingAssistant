@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$script_dir/lib/entry-env.sh"
-image=hutter-prize-judge:local
+image=hutter-prize-judging:local
 entry_dir=""
 compressor_path=""
 reference_path="$script_dir/enwik9"
@@ -27,7 +27,7 @@ Usage: ./compress-entry.sh [OPTIONS] ENTRY_DIR COMPRESSOR ENWIK9
 
 Run the rebuilt COMPRESSOR offline and unprivileged under its entrant-declared
 basename, with the literal argument vector and artifact aliases declared by
-ENTRY_DIR/entry.env. No contestant launcher or judge compatibility alias is
+ENTRY_DIR/entry.env. No contestant launcher or orchestration compatibility alias is
 used.
 
 Options:
@@ -42,7 +42,7 @@ Options:
   --disk-poll-seconds N      Default: 10
   --cpus N                   Default: 1
   --expected-size N          Expected input bytes (default: 1000000000)
-  --image NAME               Default: hutter-prize-judge:local
+  --image NAME               Default: hutter-prize-judging:local
 EOF
 }
 

@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$script_dir/lib/entry-env.sh"
-image=hutter-prize-judge:local
+image=hutter-prize-judging:local
 entry_dir=""
 output_dir=""
 results_path="$script_dir/Results"
@@ -31,13 +31,13 @@ Usage: ./prepare-entry.sh [OPTIONS] ENTRY_DIR
 Safely unpack the source package named by ENTRY_DIR/entry.env. The package
 must contain one top-level directory holding install.sh, build.sh, the declared
 argument file(s), and the complete source. The normalized prepared directory
-is printed on stdout. No filename is inferred by the judge.
+is printed on stdout. No filename is inferred by the orchestrator.
 
 Options:
   --output DIR       Required new directory for prepared source
   --results DIR      Store preparation evidence under DIR (default: ./Results)
-  --image NAME       Common judge image (default: hutter-prize-judge:local)
-  --skip-build       Reuse the common judge image
+  --image NAME       Common judging image (default: hutter-prize-judging:local)
+  --skip-build       Reuse the common judging image
 EOF
 }
 
@@ -149,8 +149,8 @@ chmod 0444 "$result_dir/scripts/"*
   echo "archive_sha256=$(sha256sum "$entry_dir/$HP_ARCHIVE" | awk '{print $1}')"
   echo "preparation_network=none"
   echo "preparation_uid=65532"
-  echo "judge_image=$image"
-  echo "judge_image_id=$(docker image inspect "$image" --format '{{.Id}}')"
+  echo "judging_image=$image"
+  echo "judging_image_id=$(docker image inspect "$image" --format '{{.Id}}')"
 } > "$result_dir/package.env"
 
 find -P "$output_dir" -mindepth 1 -printf '%y\t%P\t%s\n' \

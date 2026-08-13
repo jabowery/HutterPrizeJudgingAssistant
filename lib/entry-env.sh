@@ -141,7 +141,7 @@ hp_manifest_require_linux() {
   case "$HP_EXECUTION_PLATFORM" in
     linux-x86|linux-x86_64) ;;
     *)
-      hp_manifest_die "$HP_EXECUTION_PLATFORM requires a Windows judge worker; this Docker worker executes Linux binaries only"
+      hp_manifest_die "$HP_EXECUTION_PLATFORM requires a Windows judging worker; this Docker worker executes Linux binaries only"
       ;;
   esac
 }

@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=hutter-prize-judge:local
+ARG BASE_IMAGE=hutter-prize-judging:local
 FROM ${BASE_IMAGE}
 
 COPY install.sh /opt/hutter-entry/install.sh

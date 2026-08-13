@@ -13,7 +13,7 @@ mkdir -p \
   "$test_dir/Entries/Memory" \
   "$test_dir/Entries/Slow" \
   "$test_dir/work"
-printf 'small judge fixture\n' > "$test_dir/enwik9"
+printf 'small judging fixture\n' > "$test_dir/enwik9"
 
 cat > "$test_dir/Entries/Good/archive9" <<'EOF'
 #!/bin/sh
@@ -27,19 +27,19 @@ test ! -e /proc/self/status
 test -L /proc/self/exe
 test -r /proc/self/exe
 test ! -e /proc/1/root
-printf 'small judge fixture\n' > data9
+printf 'small judging fixture\n' > data9
 EOF
 
 cat > "$test_dir/Entries/Fork/archive9" <<'EOF'
 #!/bin/sh
 set -eu
-(printf 'small judge fixture\n' > data9) &
+(printf 'small judging fixture\n' > data9) &
 wait
 EOF
 
 cat > "$test_dir/Entries/Bad/archive9" <<'EOF'
 #!/bin/sh
-printf 'SMALL JUDGE FIXTURE\n' > data9
+printf 'SMALL JUDGING FIXTURE\n' > data9
 EOF
 
 cat > "$test_dir/Entries/Nested/archive9" <<'EOF'
@@ -48,7 +48,7 @@ if [ "${1:-}" = child ]; then
   exit 0
 fi
 ./archive9 child
-printf 'small judge fixture\n' > data9
+printf 'small judging fixture\n' > data9
 EOF
 
 cat > "$test_dir/Entries/Slow/archive9" <<'EOF'
@@ -67,7 +67,7 @@ while [ "$i" -lt 24 ]; do
   allocation=$allocation$allocation
   i=$((i + 1))
 done
-printf 'small judge fixture\n' > data9
+printf 'small judging fixture\n' > data9
 EOF
 
 chmod 0555 \

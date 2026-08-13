@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 
-image="hutter-prize-judge:local"
+image="hutter-prize-judging:local"
 entries_path=""
 reference_path=""
 results_path="$script_dir/Results"
@@ -43,7 +43,7 @@ executable. Artifact names are never inferred.
 
 Options:
   --enwik9 FILE              Reference enwik9 (default: ./enwik9)
-  --entry NAME               Judge only NAME; may be repeated
+  --entry NAME               Process only NAME; may be repeated
   --results DIR              Result directory (default: ./Results)
   --work-root DIR            Put isolated work directories on this filesystem
   --executable NAME          Required entrant-declared executable basename
@@ -467,8 +467,8 @@ for entry_dir in "${entry_dirs[@]}"; do
     echo "cgroup_memory_ceiling_bytes=$cgroup_memory_ceiling_bytes"
     echo "disk_limit_bytes=$disk_limit_bytes"
     echo "work_root=${work_root:-docker-managed-volume}"
-    echo "judge_image=$image"
-    echo "judge_image_id=$image_id"
+    echo "judging_image=$image"
+    echo "judging_image_id=$image_id"
     echo "docker_server_version=$docker_version"
   } > "$entry_results/preflight.env"
 
@@ -497,7 +497,7 @@ for entry_dir in "${entry_dirs[@]}"; do
     )
   else
     active_volume="$(docker volume create \
-      --label hutter-prize-judge=true \
+      --label hutter-prize-judging=true \
       --label "hutter-prize-run=$run_stamp" \
       --label "hutter-prize-entry=$entry_name")"
     work_mount_rw=(--mount "type=volume,source=$active_volume,target=/work")
@@ -510,7 +510,7 @@ for entry_dir in "${entry_dirs[@]}"; do
   declare -a invocation_mounts=(
     --mount "type=bind,source=$archive_path,target=/submission/executable,readonly"
   )
-  arguments_runtime_name=judge.arguments
+  arguments_runtime_name=declared.arguments
   if [[ -n "$arguments_file" ]]; then
     arguments_runtime_name="$(basename -- "$arguments_file")"
     invocation_mounts+=(

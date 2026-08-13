@@ -144,7 +144,7 @@ The aliases have precise roles:
 - `DECOMPRESSED_OUTPUT`: exact file whose contents must equal `enwik9`.
 
 No alias, symlink, fallback name, PATH lookup, or executable inference is added
-by the judge.
+by the judging system.
 
 The `*_FORMAT` values are:
 
@@ -155,9 +155,9 @@ The `*_FORMAT` values are:
   form.
 
 UPX normalization is performed by a trusted, pinned unpacker in its own
-offline container. The normalized executable is returned to the host judge,
-hashed/sized/typed, and only then supplied to a new execution container. The
-original packed bytes remain the scored artifact.
+offline container. The normalized executable is returned to the host
+orchestrator, hashed/sized/typed, and only then supplied to a new execution
+container. The original packed bytes remain the scored artifact.
 
 ## 3. Source-package layout
 
@@ -175,8 +175,8 @@ submission-source/
 
 Do not put `entry.env`, the initially submitted archive, or a compressor
 launcher in this package. In particular, there is no `compress.sh` contract.
-The trusted judge reads the literal argument file and invokes the declared
-executable directly.
+The trusted orchestrator reads the literal argument file and invokes the
+declared executable directly.
 
 ## 4. `install.sh`
 
@@ -193,8 +193,9 @@ source tree is mounted read-only at `/entry`; the current directory `/work` is
 writable. It must write the executable basename(s) declared by `COMPRESSOR` and,
 for the Relaxations form, `DECOMPRESSOR`, directly into `/work`.
 
-Only those declared files are returned to the host judge. A larger helper left
-elsewhere in `/work` cannot be reached by the formal execution container.
+Only those declared files are returned to the host orchestrator. A larger
+helper left elsewhere in `/work` cannot be reached by the formal execution
+container.
 
 ## 6. Argument vectors
 
@@ -218,8 +219,8 @@ archive9.bhm
 data9
 ```
 
-The judge records the exact argument-file byte count and digest for score
-review.
+The judging system records the exact argument-file byte count and digest for
+score review.
 
 ## 7. Runtime contract
 
@@ -232,8 +233,8 @@ An executable may create temporary data, but it may not execute itself, a
 wrapper target, a shell command, or an extracted helper. A trusted monitor
 rejects any later `execve`/`execveat`. If your algorithm genuinely requires a
 second executable, it must be expressed as a distinct declared artifact stage;
-the judge must be able to copy that artifact out, evaluate it, and start a new
-container before it runs.
+the orchestrator must be able to copy that artifact out, evaluate it, and start
+a new container before it runs.
 
 For a self-extracting entry, the archive receives no arguments and must create
 `DECOMPRESSED_OUTPUT`. For a separate-decompressor entry, the declared archive
@@ -243,7 +244,7 @@ data and arguments are staged beside `DECOMPRESSOR`.
 
 The technical report proposes the official standard or Relaxations formula,
 including argument bytes. It does not accept a contestant-provided byte total.
-Judges must still verify compilation options, command-line accounting,
+Human judges must still verify compilation options, command-line accounting,
 licensing, attribution, algorithm disclosure, source correspondence, platform
 eligibility, and the spirit of the Prize.
 
