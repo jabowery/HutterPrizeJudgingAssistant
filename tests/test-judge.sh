@@ -196,17 +196,23 @@ tar --create --gzip --file "$test_dir/Entries/Separate/submission.tar.gz" \
   --directory "$test_dir/Entries/Separate" package-root
 rm -rf -- "$separate_root"
 
-# Fail before creating a results run or printing a build banner when the
-# current host account cannot access the Docker daemon.
+# Re-execute the trusted orchestrator through sudo before creating a results
+# run or printing a build banner when Docker socket access is denied.
 mkdir "$test_dir/fake-docker-bin"
 cat > "$test_dir/fake-docker-bin/docker" <<'EOF'
 #!/bin/sh
 echo 'permission denied while trying to connect to the docker API at unix:///var/run/docker.sock' >&2
 exit 1
 EOF
-chmod 0555 "$test_dir/fake-docker-bin/docker"
+cat > "$test_dir/fake-docker-bin/sudo" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$@" > "${FAKE_SUDO_LOG:?}"
+exit 73
+EOF
+chmod 0555 "$test_dir/fake-docker-bin/docker" "$test_dir/fake-docker-bin/sudo"
 set +e
-PATH="$test_dir/fake-docker-bin:$PATH" "$project_dir/judge.sh" \
+FAKE_SUDO_LOG="$test_dir/fake-sudo.log" \
+  PATH="$test_dir/fake-docker-bin:$PATH" "$project_dir/judge.sh" \
   --geekbench-score 8400000 \
   --expected-size "$fixture_size" \
   --work-root "$test_dir/work" \
@@ -215,9 +221,20 @@ PATH="$test_dir/fake-docker-bin:$PATH" "$project_dir/judge.sh" \
   >"$test_dir/docker-denied.stdout" 2>"$test_dir/docker-denied.stderr"
 docker_denied_exit=$?
 set -e
-(( docker_denied_exit == 2 ))
-grep -q 'cannot access the Docker daemon socket' "$test_dir/docker-denied.stderr"
-grep -q 'sudo usermod -aG docker' "$test_dir/docker-denied.stderr"
+if (( EUID == 0 )); then
+  (( docker_denied_exit == 2 ))
+  grep -q 'root cannot access the Docker daemon' "$test_dir/docker-denied.stderr"
+  [[ ! -e "$test_dir/fake-sudo.log" ]]
+else
+  (( docker_denied_exit == 73 ))
+  grep -q 'Docker daemon access requires elevation; invoking sudo' \
+    "$test_dir/docker-denied.stderr"
+  mapfile -t sudo_arguments < "$test_dir/fake-sudo.log"
+  [[ "${sudo_arguments[0]}" == -- ]]
+  [[ "${sudo_arguments[1]}" == "$project_dir/judge.sh" ]]
+  [[ "${sudo_arguments[2]}" == --geekbench-score ]]
+  [[ "${sudo_arguments[3]}" == 8400000 ]]
+fi
 ! grep -q 'Building the common judge image' "$test_dir/docker-denied.stderr"
 [[ ! -e "$test_dir/results-DockerDenied" ]]
 

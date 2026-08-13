@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly -a original_argv=("$@")
 source "$script_dir/lib/entry-env.sh"
 image=hutter-prize-judge:local
 entry_dir=""
@@ -20,6 +21,8 @@ expected_size=1000000000
 active_stage_root=""
 qualification_pid=""
 qualification_container_file=""
+results_path_created=false
+run_results=""
 
 usage() {
   cat <<'EOF'
@@ -56,29 +59,23 @@ EOF
 
 die() { echo "error: $*" >&2; exit 2; }
 require_docker_daemon() {
-  local diagnostic current_user
+  local diagnostic
   command -v docker >/dev/null \
     || die "Docker is not installed or is not in PATH"
   if diagnostic="$(docker info --format '{{.ServerVersion}}' 2>&1)"; then
     return
   fi
 
-  current_user="${USER:-$(id -un)}"
   if [[ "$diagnostic" == *"permission denied"* \
       || "$diagnostic" == *"Permission denied"* ]]; then
-    cat >&2 <<EOF
-error: user $current_user cannot access the Docker daemon socket.
-
-On Ubuntu, grant this account Docker access once:
-  sudo usermod -aG docker $current_user
-
-Then log out and back in (or run: newgrp docker), and verify:
-  docker info
-
-Do not run judge.sh with sudo and do not make /var/run/docker.sock
-world-writable. Membership in the docker group grants root-level host access;
-use a disposable judging machine or VM for untrusted entries.
-EOF
+    if (( EUID != 0 )); then
+      command -v sudo >/dev/null \
+        || die "Docker access requires root, but sudo is not installed or is not in PATH"
+      echo "Docker daemon access requires elevation; invoking sudo..." >&2
+      exec sudo -- "$script_dir/judge.sh" "${original_argv[@]}"
+      die "sudo could not re-execute judge.sh"
+    fi
+    printf 'error: root cannot access the Docker daemon:\n%s\n' "$diagnostic" >&2
   else
     printf 'error: Docker daemon is unavailable:\n%s\n' "$diagnostic" >&2
   fi
@@ -188,6 +185,22 @@ cleanup_qualification() {
 cleanup_all() {
   cleanup_qualification
   cleanup_staged_entry
+  restore_invoking_user_ownership
+}
+restore_invoking_user_ownership() {
+  local owner
+  (( EUID == 0 )) || return 0
+  [[ "${SUDO_UID:-}" =~ ^[0-9]+$ && "${SUDO_GID:-}" =~ ^[0-9]+$ ]] \
+    || return 0
+  owner="$SUDO_UID:$SUDO_GID"
+
+  if [[ -n "$run_results" && -d "$run_results" && ! -L "$run_results" ]]; then
+    chown -R -- "$owner" "$run_results" >/dev/null 2>&1 || true
+  fi
+  if [[ "$results_path_created" == true \
+      && -d "$results_path" && ! -L "$results_path" ]]; then
+    chown -- "$owner" "$results_path" >/dev/null 2>&1 || true
+  fi
 }
 trap cleanup_all EXIT
 trap 'exit 130' INT TERM
@@ -271,11 +284,13 @@ fi
 require_materialized_assets
 require_docker_daemon
 
+[[ -e "$results_path" ]] || results_path_created=true
 mkdir -p -- "$results_path"
 results_path="$(realpath -- "$results_path")"
 readonly stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 readonly entry_name="$(basename -- "$entry_dir")"
-readonly run_results="$results_path/full-$stamp-$entry_name"
+run_results="$results_path/full-$stamp-$entry_name"
+readonly run_results
 mkdir -p -- "$run_results/generated"
 qualification_container_file="$run_results/qualification-container-id"
 

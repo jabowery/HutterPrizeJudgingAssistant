@@ -27,25 +27,22 @@ UPX archives.
 
 ## Host Docker access
 
-Run the judge as an ordinary user that can access the Docker daemon. Test this
-before starting a long judgment:
+Invoke `judge.sh` as your ordinary user. It checks Docker access before creating
+a results run or starting a build. If that account cannot open the Docker daemon
+socket, the trusted host orchestrator re-executes itself with `sudo`, using the
+customary password prompt:
 
 ```bash
-docker info
+./judge.sh --work-root /mnt/large-disk/HutterPrizeJudge Entries/NAME ./enwik9
 ```
 
-On Ubuntu, if this reports permission denied for `/var/run/docker.sock`, add the
-judging account to the Docker group once:
-
-```bash
-sudo usermod -aG docker "$USER"
-```
-
-Log out and back in so the new group membership takes effect, or run
-`newgrp docker`, and then repeat `docker info`. Do not run `judge.sh` with
-`sudo`, and do not make the socket world-writable. The Docker group grants
-root-level privileges on the host, so use a disposable, fully patched machine
-or VM without credentials or unrelated data when judging untrusted entries.
+The elevated host process returns the completed results tree to the invoking
+user's ownership. Contestant-provided executables are not run as root: each
+still runs in its own isolated container as UID 65532. Do not make
+`/var/run/docker.sock` world-writable. Direct Docker access and membership in
+the Docker group both confer root-equivalent power on the host, so use a
+disposable, fully patched machine or VM without credentials or unrelated data
+when judging untrusted entries.
 
 ## Run a complete Linux judgment
 
