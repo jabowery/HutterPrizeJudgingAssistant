@@ -27,10 +27,10 @@ Note the files in that example directory:
 
 - `archive9` is an executable archive of `enwik9` used to exercise the judging
   system.
-- `example-source.tar.gz` contains the modified source and entrant scripts.
+- `example-source.tar.gz` contains the purpose-built source and entrant scripts.
 - `entry.env` declares the artifact names and formats to the generic
   orchestrator.
 
-This directory is a substantially modified testing fixture derived from an
-earlier submission. It is not Vladimir Ivanov's actual entry and must not be
-represented as such or as a competitive Hutter Prize result.
+This directory is a purpose-built procedural fixture with no derivation from a
+Hutter Prize submission. It exists only to exercise the ordinary judging flow
+quickly and must not be represented as a competitive Hutter Prize result.

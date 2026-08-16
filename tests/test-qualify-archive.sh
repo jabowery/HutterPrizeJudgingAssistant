@@ -11,7 +11,7 @@ mkdir -p \
   "$test_dir/Entries/Bad" \
   "$test_dir/Entries/Nested" \
   "$test_dir/Entries/Memory" \
-  "$test_dir/Entries/Slow" \
+  "$test_dir/Entries/CpuLimit" \
   "$test_dir/work"
 printf 'small judging fixture\n' > "$test_dir/enwik9"
 
@@ -51,7 +51,7 @@ fi
 printf 'small judging fixture\n' > data9
 EOF
 
-cat > "$test_dir/Entries/Slow/archive9" <<'EOF'
+cat > "$test_dir/Entries/CpuLimit/archive9" <<'EOF'
 #!/bin/sh
 while :; do
   :
@@ -76,7 +76,7 @@ chmod 0555 \
   "$test_dir/Entries/Bad/archive9" \
   "$test_dir/Entries/Nested/archive9" \
   "$test_dir/Entries/Memory/archive9" \
-  "$test_dir/Entries/Slow/archive9"
+  "$test_dir/Entries/CpuLimit/archive9"
 readonly fixture_size="$(stat --format='%s' "$test_dir/enwik9")"
 
 set +e
@@ -199,7 +199,7 @@ set +e
   --skip-build \
   --executable archive9 \
   --output data9 \
-  --entry Slow \
+  --entry CpuLimit \
   --expected-size "$fixture_size" \
   --time-limit-seconds 1 \
   --memory-limit-bytes 134217728 \
@@ -212,6 +212,6 @@ set -e
 
 (( slow_exit != 0 ))
 slow_summary="$(find "$test_dir/slow-results" -name summary.tsv -type f -print -quit)"
-grep -q $'^Slow\tFAIL_TIME\t' "$slow_summary"
+grep -q $'^CpuLimit\tFAIL_TIME\t' "$slow_summary"
 
 echo "archive qualification integration tests passed"
