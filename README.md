@@ -1,59 +1,17 @@
-# Hutter Prize Docker judging system
+# Hutter Prize Judging Assistance
 
-`judging_assistance.sh` automates the reproducible technical part of judging a
-Hutter Prize submission. The authoritative rules remain the
-[Hutter Prize detailed rules](https://www.hutter1.net/prize/hrules.htm); this
-repository records the artifacts, isolation boundaries, resource measurements,
-hashes, and proposed score for human review.
+This repository minimizes the manual work required to evaluate a Hutter Prize
+submission. `judging_assistance.sh` rebuilds and runs the submitted software,
+enforces the technical resource limits, verifies the result, and records the
+evidence and proposed score for human review. Its security model is conditioned
+on a Linux host whose kernel is hardened for executing untrusted container
+workloads.
 
+The authoritative rules remain the
+[Hutter Prize detailed rules](https://www.hutter1.net/prize/hrules.htm).
 Entrants should follow [ENTRANT_INSTRUCTIONS.md](ENTRANT_INSTRUCTIONS.md).
 
-## Terminology
-
-In this documentation, a **judge** is a human Hutter Prize official. Automated
-components are called `judging_assistance.sh`, the judging system, the
-orchestrator, or a worker. The documentation does not assign human decisions or
-obligations to software.
-
-## Automatic Git LFS materialization
-
-The benchmark, normalization tool, example source, and example executable are
-stored with Git LFS. Invoke `judging_assistance.sh` normally after cloning. If
-required files are still small LFS pointers, `judging_assistance.sh`
-automatically:
-
-- installs Git LFS through the trusted
-  [`install-host-dependencies.sh`](install-host-dependencies.sh) helper, with
-  the customary `sudo` prompt, if necessary; and
-- downloads only the required LFS objects as the invoking user.
-
-No preliminary Git LFS command is required. The orchestrator verifies that
-downloads were materialized and checks the pinned SHA-256 digests of the Linux
-Geekbench and UPX archives before building Docker. The helper is a separate,
-auditable root/network phase and installs only the `git-lfs` Ubuntu package.
-
-## Host Docker access
-
-Invoke `judging_assistance.sh` as your ordinary user. It checks Docker access
-before creating a results run or starting a build. If that account cannot open
-the Docker daemon socket, the trusted host orchestrator re-executes itself with
-`sudo`, using the customary password prompt:
-
-```bash
-./judging_assistance.sh \
-  --work-root /mnt/large-disk/HutterPrizeJudging \
-  Entries/NAME ./enwik9
-```
-
-The elevated host process returns the completed results tree to the invoking
-user's ownership. Contestant-provided executables are not run as root: each
-still runs in its own isolated container as UID 65532. Do not make
-`/var/run/docker.sock` world-writable. Direct Docker access and membership in
-the Docker group both confer root-equivalent power on the host, so use a
-disposable, fully patched machine or VM without credentials or unrelated data
-when judging untrusted entries.
-
-## Run a complete Linux judgment
+## Run
 
 From the repository root:
 
@@ -73,6 +31,26 @@ The current Docker worker executes Linux x86/x86-64 entries. The manifest also
 defines Windows x86/x86-64 names so the same orchestration contract can be used
 by a native Windows worker; this Linux worker rejects a Windows manifest rather
 than running it under an unscored compatibility layer.
+
+## Automatic host initialization
+
+Invoke `judging_assistance.sh` as an ordinary user. When necessary, it installs
+Git LFS through the separate `install-host-dependencies.sh` helper, materializes
+the required repository objects, and re-executes the trusted host orchestrator
+through `sudo` to access Docker. The customary password prompt is the only
+required interaction. Results created by the elevated process are returned to
+the invoking user's ownership.
+
+The Docker socket must not be made world-writable; access to it is
+root-equivalent. Contestant executables do not receive that access and run as
+UID 65532 in their execution containers.
+
+## Terminology
+
+In this documentation, a **judge** is a human Hutter Prize official. Automated
+components are called `judging_assistance.sh`, the judging system, the
+orchestrator, or a worker. The documentation does not assign human decisions or
+obligations to software.
 
 ## Submission boundary
 
@@ -142,11 +120,9 @@ offline. `build.sh` runs as UID/GID 65532 in its own container; normalization
 uses trusted orchestration tools as UID/GID 65532; every compressor/decompressor
 runs offline as UID/GID 65532 under the formal limits.
 
-Docker shares the host kernel. Namespace and capability restrictions reduce
-exposure but are not a security boundary equivalent to a virtual machine: a
-kernel or container-runtime vulnerability could escape the container. Treat
-adversarial submissions as hostile and run the entire judging system on a
-disposable, fully patched machine or VM with no credentials or unrelated data.
+Docker shares the host kernel. Namespace and capability restrictions therefore
+do not replace the hardened-kernel condition stated at the beginning of this
+document.
 
 ## Resource accounting
 
