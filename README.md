@@ -3,9 +3,11 @@
 This repository minimizes the manual work required to evaluate a Hutter Prize
 submission. `judging_assistance.sh` rebuilds and runs the submitted software,
 enforces the technical resource limits, verifies the result, and records the
-evidence and proposed score for human review. Its security model is conditioned
-on a Linux host whose kernel is hardened for executing untrusted container
-workloads.
+evidence and proposed score for human review. 
+
+These processes are run within Docker containers to minimize the risk of an 
+adversarial entry.  Its security model is conditioned on a Linux host whose 
+kernel is hardened against [container esape](https://docs.docker.com/engine/security/#linux-kernel-capabilities).
 
 The authoritative rules remain the
 [Hutter Prize detailed rules](https://www.hutter1.net/prize/hrules.htm).
