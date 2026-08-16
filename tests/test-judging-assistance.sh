@@ -354,6 +354,12 @@ run_full() {
 
 run_full Identical
 identical_final="$(find "$test_dir/results-Identical" -name final.env -type f -print -quit)"
+identical_security="$(find "$test_dir/results-Identical" \
+  -name host-security.env -type f -print -quit)"
+grep -q '^preflight_status=PASS$' "$identical_security"
+grep -q '^runtime_seccomp_mode=2$' "$identical_security"
+grep -q '^runtime_no_new_privs=1$' "$identical_security"
+grep -Eq '^enforcing_lsm=(apparmor|selinux)$' "$identical_security"
 grep -q '^technical_verdict=PASS$' "$identical_final"
 grep -q '^job_slots=2$' "$identical_final"
 grep -q '^execution_mode=parallel$' "$identical_final"

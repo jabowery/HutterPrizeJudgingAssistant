@@ -29,16 +29,17 @@ usage() {
 Usage: ./judging_assistance.sh [OPTIONS] ENTRY_DIR [ENWIK9]
 
 Complete standardized technical judging:
-  1. calibrate this Docker environment with Geekbench 5,
-  2. parse entry.env and unpack its declared source package offline,
-  3. run the declared submitted decompressor artifact in its own container,
-  4. install dependencies in the sole entry root/network phase,
-  5. run build.sh offline to produce declared executable artifact(s),
-  6. invoke the rebuilt compressor in a new container with its declared names
+  1. verify the native Docker security boundary before entrant code can run,
+  2. calibrate this Docker environment with Geekbench 5,
+  3. parse entry.env and unpack its declared source package offline,
+  4. run the declared submitted decompressor artifact in its own container,
+  5. install dependencies in the sole entry root/network phase,
+  6. run build.sh offline to produce declared executable artifact(s),
+  7. invoke the rebuilt compressor in a new container with its declared names
      offline under the formal resource limits,
-  7. return and evaluate the generated archive in the host judging environment,
+  8. return and evaluate the generated archive in the host judging environment,
      and
-  8. invoke the appropriate declared decompressor in another new container
+  9. invoke the appropriate declared decompressor in another new container
      when the evaluated artifacts are not byte-identical to those qualified.
 
 Options:
@@ -319,6 +320,13 @@ qualification_container_file="$run_results/qualification-container-id"
 echo "Building the common judging image..." >&2
 docker build --tag "$image" "$script_dir" >&2 \
   || stage_fail common_image "Docker image build failed"
+
+echo "Checking the native Docker security boundary..." >&2
+if ! "$script_dir/host-security-preflight.sh" \
+    --image "$image" --report "$run_results/host-security.env" \
+    2> >(tee "$run_results/host-security.log" >&2); then
+  stage_fail host_security "required Docker confinement is not active"
+fi
 
 active_stage_root="$(mktemp -d -- "$work_root/hutter-package-$stamp.XXXXXX")"
 prepared_entry="$active_stage_root/$entry_name"

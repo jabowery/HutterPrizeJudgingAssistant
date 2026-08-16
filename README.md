@@ -45,6 +45,23 @@ The Docker socket must not be made world-writable; access to it is
 root-equivalent. Contestant executables do not receive that access and run as
 UID 65532 in their execution containers.
 
+Before any entrant-provided code is unpacked, built, or executed, the
+orchestrator runs a host-security preflight. It rejects a non-Linux daemon, a
+nonlocal Docker endpoint, a daemon using a kernel other than the host kernel,
+inactive seccomp filtering, failure to apply `no-new-privileges`, or the absence
+of a verifiably enforcing AppArmor or SELinux container profile. The checks
+follow Docker's documented
+[capability and kernel-isolation model](https://docs.docker.com/engine/security/#linux-kernel-capabilities)
+and verify the resulting test container rather than relying only on daemon
+configuration.
+
+The preflight records whether rootless Docker or user-namespace remapping maps
+container UID 0 away from host UID 0. Their absence currently produces a
+warning: entrant executables still run as UID 65532, but that is not a separate
+user-namespace boundary. The preflight also warns that local inspection cannot
+prove the absence of an unpatched host-kernel or Docker Engine vulnerability.
+Its complete findings are retained as `host-security.env` in the results tree.
+
 ## Terminology
 
 In this documentation, a **judge** is a human Hutter Prize official. Automated
@@ -157,14 +174,17 @@ does not let an entrant declare its own score.
 
 ```bash
 ./tests/test-terminology.sh
+./tests/test-host-security-preflight.sh
 ./tests/test-qualify-archive.sh
 ./tests/test-judging-assistance.sh
 ```
 
 The terminology test enforces the human/software distinction above. The
-integration tests cover tar and ZIP source packages, both official entry forms,
-parallel cancellation, memory/time/content failures, hidden build helpers,
-unknown manifest fields, and rejection of a nested executable launch.
+security-preflight test covers required confinement failures, local-daemon
+enforcement, and remapped and unremapped UID behavior. The integration tests
+cover tar and ZIP source packages, both official entry forms, parallel
+cancellation, memory/time/content failures, hidden build helpers, unknown
+manifest fields, and rejection of a nested executable launch.
 
 ## Example fixture status
 

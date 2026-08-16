@@ -1,5 +1,18 @@
 # Objective
-Create a docker script that automates Hutter Prize judging given an Entries/ subdirectory.
+Create a Docker-based system that, given an `Entries/` subdirectory, automates
+the technical evaluation required for Hutter Prize judging to the greatest
+degree practicable while minimizing the likelihood that an adversarial entry
+can escape its container and compromise the host.
+
+Treat every entrant-provided artifact and script as adversarial. Preserve
+least-privilege, per-execution container isolation and explicit artifact
+handoffs throughout the workflow. Docker shares the host kernel, so describe
+these controls as reducing rather than eliminating container-escape risk.
+
+For this objective, "practicable" is constrained to native Docker containers
+sharing the host Linux kernel. Do not introduce a virtual machine, microVM,
+hypervisor, guest kernel, or userspace kernel compatibility layer as the
+execution environment or security boundary for entrant code.
 
 In documentation, reserve "judge" for a human Hutter Prize official. Refer to
 software as `judging_assistance.sh`, the judging system, the orchestrator, or a
