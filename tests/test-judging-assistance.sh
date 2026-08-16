@@ -354,6 +354,8 @@ run_full() {
 
 run_full Identical
 identical_final="$(find "$test_dir/results-Identical" -name final.env -type f -print -quit)"
+identical_report="$(find "$test_dir/results-Identical" \
+  -name final-report.txt -type f -print -quit)"
 identical_security="$(find "$test_dir/results-Identical" \
   -name host-security.env -type f -print -quit)"
 grep -q '^preflight_status=PASS$' "$identical_security"
@@ -373,6 +375,9 @@ grep -q '^cgroup_memory_ceiling_bytes=1207959552$' "$identical_compression"
 grep -Eq '^peak_rss_bytes=[1-9][0-9]*$' "$identical_compression"
 grep -q '^command_line_bytes=22$' "$identical_compression"
 grep -q '^command_line_bytes=22$' "$identical_final"
+grep -q '^RAM peak-RSS limit: 0.125 GiB$' "$identical_report"
+grep -q '^Cgroup ceiling: 1.125 GiB$' "$identical_report"
+grep -q '^Disk: 0.104858 GB$' "$identical_report"
 
 run_full Different --serial
 different_final="$(find "$test_dir/results-Different" -name final.env -type f -print -quit)"

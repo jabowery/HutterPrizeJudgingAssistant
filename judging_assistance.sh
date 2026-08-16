@@ -4,6 +4,7 @@ set -Eeuo pipefail
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly -a original_argv=("$@")
 source "$script_dir/lib/entry-env.sh"
+source "$script_dir/lib/resource-units.sh"
 image=hutter-prize-judging:local
 entry_dir=""
 reference_path="$script_dir/enwik9"
@@ -47,9 +48,9 @@ Options:
   --geekbench-score N        Reuse a score instead of calibrating
   --results DIR              Default: ./Results
   --image NAME               Default: hutter-prize-judging:local
-  --memory-limit-bytes N     Formal peak-RSS limit (default: 10737418240 = 10 GiB)
-  --cgroup-headroom-bytes N  Supervisor/cache allowance (default: 1073741824)
-  --disk-limit-bytes N       Default: 100000000000
+  --memory-limit-bytes N     Formal peak-RSS limit (default: 10 GiB)
+  --cgroup-headroom-bytes N  Supervisor/cache allowance (default: 1 GiB)
+  --disk-limit-bytes N       Default: 100 GB
   --disk-poll-seconds N      Default: 10
   --cpus N                   Default: 1
   --jobs N                   Concurrent long-running phases: 1 or 2 (default: 2)
@@ -608,9 +609,9 @@ fi
   echo "  command-line options: $command_line_bytes"
   echo "Improvement over $record_size: $improvement_percent%"
   echo "Geekbench 5 T: $geekbench_score; limit per executable: ${time_limit_seconds}s"
-  echo "RAM peak-RSS limit: $memory_limit_bytes bytes"
-  echo "Cgroup ceiling: $cgroup_memory_ceiling_bytes bytes"
-  echo "Disk: $disk_limit_bytes bytes"
+  echo "RAM peak-RSS limit: $(hp_format_gib "$memory_limit_bytes")"
+  echo "Cgroup ceiling: $(hp_format_gib "$cgroup_memory_ceiling_bytes")"
+  echo "Disk: $(hp_format_gb "$disk_limit_bytes")"
   echo "Execution mode: $execution_mode ($job_slots long-running job slots)"
   echo "Results: $run_results"
 } | tee "$run_results/final-report.txt"

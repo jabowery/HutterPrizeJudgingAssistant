@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+source "$script_dir/lib/resource-units.sh"
 
 image="hutter-prize-judging:local"
 entries_path=""
@@ -53,9 +54,9 @@ Options:
   --output NAME              Required entrant-declared output basename
   --geekbench-score N        Geekbench 5 score T (required unless time overridden)
   --time-limit-seconds N     Override the official 70000/T-hour limit
-  --memory-limit-bytes N     Formal peak-RSS limit (default: 10737418240 = 10 GiB)
-  --cgroup-headroom-bytes N  Supervisor/cache allowance (default: 1073741824)
-  --disk-limit-bytes N       Sampled allocated-disk limit (default: 100000000000)
+  --memory-limit-bytes N     Formal peak-RSS limit (default: 10 GiB)
+  --cgroup-headroom-bytes N  Supervisor/cache allowance (default: 1 GiB)
+  --disk-limit-bytes N       Sampled allocated-disk limit (default: 100 GB)
   --disk-poll-seconds N      Disk sampling interval (default: 10)
   --cpus N                   CPU capacity (default: 1)
   --record-size N            Previous record L (default: 110793128)
@@ -353,7 +354,7 @@ if [[ "$preflight_only" != true ]]; then
   [[ "$work_available_bytes" =~ ^[0-9]+$ ]] \
     || die "could not determine free space for $work_filesystem_path"
   (( work_available_bytes >= disk_limit_bytes )) \
-    || die "work filesystem has $work_available_bytes free bytes; disk limit requires $disk_limit_bytes (use --work-root)"
+    || die "work filesystem has $(hp_format_gb "$work_available_bytes") free; disk limit requires $(hp_format_gb "$disk_limit_bytes") (use --work-root)"
 fi
 
 declare -a entry_dirs=()
@@ -673,9 +674,9 @@ done
   else
     echo "Time limit: $time_limit_seconds seconds (explicit override; no Geekbench score)"
   fi
-  echo "Memory peak-RSS limit: $memory_limit_bytes bytes"
-  echo "Cgroup ceiling: $cgroup_memory_ceiling_bytes bytes"
-  echo "Disk limit: $disk_limit_bytes allocated bytes (sampled every $disk_poll_seconds seconds)"
+  echo "Memory peak-RSS limit: $(hp_format_gib "$memory_limit_bytes")"
+  echo "Cgroup ceiling: $(hp_format_gib "$cgroup_memory_ceiling_bytes")"
+  echo "Disk limit: $(hp_format_gb "$disk_limit_bytes") allocated (sampled every $disk_poll_seconds seconds)"
   echo "Work storage: ${work_root:-Docker-managed volume}"
   echo
   column -t -s $'\t' "$summary_file" 2>/dev/null || cat "$summary_file"

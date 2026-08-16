@@ -145,11 +145,12 @@ document.
 
 ## Resource accounting
 
-The default formal limits are 10 GiB peak RSS and 100,000,000,000 bytes of
-temporary disk. A higher cgroup ceiling reserves room for the trusted monitor
-and cache while GNU `time` measures the contestant process tree. CPU capacity,
-wall time, disk allocation, container inspection, logs, hashes, and image IDs
-are retained under `Results/`.
+The default formal limits are 10 GiB peak RSS and 100 GB of temporary disk. A
+higher cgroup ceiling reserves room for the trusted monitor and cache while GNU
+`time` measures the contestant process tree. Human-readable reports use GiB for
+RAM and decimal GB for disk; machine-readable evidence retains the exact
+integer byte values. CPU capacity, wall time, disk allocation, container
+inspection, logs, hashes, and image IDs are retained under `Results/`.
 
 The proposed standard score is:
 
@@ -178,6 +179,7 @@ does not let an entrant declare its own score.
 ./tests/test-terminology.sh
 ./tests/test-host-security-preflight.sh
 ./tests/test-example-entry.sh
+./tests/test-resource-units.sh
 ./tests/test-qualify-archive.sh
 ./tests/test-judging-assistance.sh
 ```
@@ -186,13 +188,14 @@ The terminology test enforces the human/software distinction above. The
 security-preflight test covers required confinement failures, local-daemon
 enforcement, and remapped and unremapped UID behavior. The Example test checks
 that the successful fixture remains purpose-built and uses portable baseline
-x86-64 compilation. The integration tests generate their own small entries and
-alternate `entry.env` manifests under a temporary directory. Those synthetic
-entries cover tar and ZIP source packages, both official entry forms, parallel
-cancellation, memory/time/content failures, hidden build helpers, unknown
-manifest fields, and rejection of a nested executable launch. In particular,
-the CPU-bound failure uses a one-second limit so that testing the time ceiling
-does not make the suite slow.
+x86-64 compilation. The resource-unit test enforces GiB for RAM and decimal GB
+for disk in human-readable output. The integration tests generate their own
+small entries and alternate `entry.env` manifests under a temporary directory.
+Those synthetic entries cover tar and ZIP source packages, both official entry
+forms, parallel cancellation, memory/time/content failures, hidden build
+helpers, unknown manifest fields, and rejection of a nested executable launch.
+In particular, the CPU-bound failure uses a one-second limit so that testing
+the time ceiling does not make the suite slow.
 
 ## Example fixture status
 
@@ -211,6 +214,6 @@ The pinned Ubuntu 22.04 build produces a 1,618,304-byte compressor and a
 359,695,801-byte archive. Including its 19-byte argument file gives a formal
 standard size of 361,314,124 bytes, which is deliberately noncompetitive. In a
 direct reference run over the full one-billion-byte `enwik9`, compression took
-3.06 seconds and decompression took 1.18 seconds, with less than 4 MiB peak RSS
-in either direction. Timings vary by host; their purpose here is to establish
-that this fixture completes in seconds rather than days.
+3.06 seconds and decompression took 1.18 seconds, with less than 0.004 GiB peak
+RSS in either direction. Timings vary by host; their purpose here is to
+establish that this fixture completes in seconds rather than days.

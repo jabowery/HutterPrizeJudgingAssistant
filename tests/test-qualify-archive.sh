@@ -104,6 +104,10 @@ fi
 
 good_summary="$(find "$test_dir/good-results" -name summary.tsv -type f -print -quit)"
 grep -q $'^Good\tPASS\t' "$good_summary"
+good_report="$(find "$test_dir/good-results" -name report.txt -type f -print -quit)"
+grep -q '^Memory peak-RSS limit: 0.125 GiB$' "$good_report"
+grep -q '^Cgroup ceiling: 1.125 GiB$' "$good_report"
+grep -q '^Disk limit: 0.104858 GB allocated ' "$good_report"
 
 set +e
 "$project_dir/qualify-archive.sh" \

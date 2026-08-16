@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$script_dir/lib/entry-env.sh"
+source "$script_dir/lib/resource-units.sh"
 image=hutter-prize-judging:local
 entry_dir=""
 compressor_path=""
@@ -36,9 +37,9 @@ Options:
   --work-root DIR            Required large temporary filesystem
   --geekbench-score N        Geekbench 5 single-core score T
   --time-limit-seconds N     Override the 70000/T-hour limit
-  --memory-limit-bytes N     Formal peak-RSS limit (default: 10737418240)
-  --cgroup-headroom-bytes N  Supervisor/cache allowance (default: 1073741824)
-  --disk-limit-bytes N       Default: 100000000000
+  --memory-limit-bytes N     Formal peak-RSS limit (default: 10 GiB)
+  --cgroup-headroom-bytes N  Supervisor/cache allowance (default: 1 GiB)
+  --disk-limit-bytes N       Default: 100 GB
   --disk-poll-seconds N      Default: 10
   --cpus N                   Default: 1
   --expected-size N          Expected input bytes (default: 1000000000)
@@ -126,7 +127,7 @@ work_root="$(realpath -- "$work_root")"
   || die "enwik9 must be exactly $expected_size bytes"
 available_bytes="$(df --block-size=1 --output=avail "$work_root" | awk 'NR == 2 { print $1 }')"
 (( available_bytes >= disk_limit_bytes )) \
-  || die "work filesystem has $available_bytes free bytes; $disk_limit_bytes required"
+  || die "work filesystem has $(hp_format_gb "$available_bytes") free; $(hp_format_gb "$disk_limit_bytes") required"
 docker image inspect "$image" >/dev/null || die "missing image: $image"
 
 mkdir -p -- "$results_path"
