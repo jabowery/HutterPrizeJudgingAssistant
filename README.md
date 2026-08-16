@@ -149,9 +149,10 @@ The default formal limits are 10 GiB peak RSS and 100 GB of temporary disk. A
 higher cgroup ceiling reserves room for the trusted monitor and cache while GNU
 `time` measures the contestant process tree. Human-readable reports use
 byte-significant GiB for RAM, byte-significant decimal GB for disk, and
-`HH:MM:SS` for durations; machine-readable evidence retains exact integer bytes
-and seconds. CPU capacity, wall time, disk allocation, container inspection,
-logs, hashes, and image IDs are retained under `Results/`.
+`HH:MM:SS` for durations. Insignificant trailing zeroes are omitted;
+machine-readable evidence retains exact integer bytes and seconds. CPU
+capacity, wall time, disk allocation, container inspection, logs, hashes, and
+image IDs are retained under `Results/`.
 
 The proposed standard score is:
 

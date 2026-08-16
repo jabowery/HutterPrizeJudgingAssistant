@@ -106,9 +106,9 @@ good_summary="$(find "$test_dir/good-results" -name summary.tsv -type f -print -
 grep -q $'^Good\tPASS\t' "$good_summary"
 good_report="$(find "$test_dir/good-results" -name report.txt -type f -print -quit)"
 grep -q '^Time limit: 00:00:30 (explicit override; no Geekbench score)$' "$good_report"
-grep -q '^Memory peak-RSS limit: 0.1250000000 GiB$' "$good_report"
-grep -q '^Cgroup ceiling: 1.1250000000 GiB$' "$good_report"
-grep -q '^Disk limit: 0.104857600 GB allocated (sampled every 00:00:01)$' "$good_report"
+grep -q '^Memory peak-RSS limit: 0.125 GiB$' "$good_report"
+grep -q '^Cgroup ceiling: 1.125 GiB$' "$good_report"
+grep -q '^Disk limit: 0.1048576 GB allocated (sampled every 00:00:01)$' "$good_report"
 
 set +e
 "$project_dir/qualify-archive.sh" \

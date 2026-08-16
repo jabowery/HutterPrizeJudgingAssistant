@@ -5,13 +5,28 @@
 
 hp_format_gib() {
   # Ten fractional digits distinguish adjacent byte counts when expressed in
-  # GiB: one byte is approximately 0.000000000931 GiB.
-  LC_ALL=C awk -v bytes="$1" 'BEGIN { printf "%.10f GiB", bytes / 1073741824 }'
+  # GiB; insignificant trailing zeroes are omitted.
+  LC_ALL=C awk -v bytes="$1" '
+    BEGIN {
+      value = sprintf("%.10f", bytes / 1073741824)
+      sub(/0+$/, "", value)
+      sub(/[.]$/, "", value)
+      printf "%s GiB", value
+    }
+  '
 }
 
 hp_format_gb() {
-  # Decimal GB requires exactly nine fractional digits for byte precision.
-  LC_ALL=C awk -v bytes="$1" 'BEGIN { printf "%.9f GB", bytes / 1000000000 }'
+  # Decimal GB requires nine fractional digits for byte precision;
+  # insignificant trailing zeroes are omitted.
+  LC_ALL=C awk -v bytes="$1" '
+    BEGIN {
+      value = sprintf("%.9f", bytes / 1000000000)
+      sub(/0+$/, "", value)
+      sub(/[.]$/, "", value)
+      printf "%s GB", value
+    }
+  '
 }
 
 hp_format_hms() {
