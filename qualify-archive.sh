@@ -331,7 +331,7 @@ mkdir -p -- "$run_results"
 if [[ "$preflight_only" != true ]]; then
   command -v docker >/dev/null || die "docker is not installed"
   timeout 30 docker info >/dev/null \
-    || die "Docker daemon is unavailable or did not answer within 30 seconds"
+    || die "Docker daemon is unavailable or did not answer within 00:00:30"
   if [[ "$skip_build" != true ]]; then
     docker build --tag "$image" "$script_dir"
   else
@@ -575,7 +575,7 @@ for entry_dir in "${entry_dirs[@]}"; do
     printf '%s\n' "$active_container" > "$container_id_file"
   fi
 
-  echo "[$entry_name] running without network/reference access (limit: ${time_limit_seconds}s)"
+  echo "[$entry_name] running without network/reference access (limit: $(hp_format_hms "$time_limit_seconds"))"
   docker start "$active_container" >/dev/null
   docker wait "$active_container" > "$entry_results/container-exit-code"
   if ! docker inspect "$active_container" \
@@ -670,13 +670,15 @@ done
   echo "Entries: $entries_path"
   echo "Reference: $([[ "$preflight_only" == true ]] && echo not-used || echo "$reference_path")"
   if [[ -n "$geekbench_score" ]]; then
-    echo "Rule time formula: 70000/$geekbench_score hours = $time_limit_seconds seconds"
+    echo "Rule time formula: 70000/$geekbench_score hours = $(hp_format_hms "$time_limit_seconds")"
+  elif [[ "$time_limit_seconds" == not_calibrated ]]; then
+    echo "Time limit: not calibrated"
   else
-    echo "Time limit: $time_limit_seconds seconds (explicit override; no Geekbench score)"
+    echo "Time limit: $(hp_format_hms "$time_limit_seconds") (explicit override; no Geekbench score)"
   fi
   echo "Memory peak-RSS limit: $(hp_format_gib "$memory_limit_bytes")"
   echo "Cgroup ceiling: $(hp_format_gib "$cgroup_memory_ceiling_bytes")"
-  echo "Disk limit: $(hp_format_gb "$disk_limit_bytes") allocated (sampled every $disk_poll_seconds seconds)"
+  echo "Disk limit: $(hp_format_gb "$disk_limit_bytes") allocated (sampled every $(hp_format_hms "$disk_poll_seconds"))"
   echo "Work storage: ${work_root:-Docker-managed volume}"
   echo
   column -t -s $'\t' "$summary_file" 2>/dev/null || cat "$summary_file"

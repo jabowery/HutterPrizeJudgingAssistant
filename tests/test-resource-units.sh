@@ -4,10 +4,18 @@ set -Eeuo pipefail
 readonly project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 source "$project_dir/lib/resource-units.sh"
 
-[[ "$(hp_format_gib 10737418240)" == "10 GiB" ]]
-[[ "$(hp_format_gib 1207959552)" == "1.125 GiB" ]]
-[[ "$(hp_format_gb 100000000000)" == "100 GB" ]]
-[[ "$(hp_format_gb 104857600)" == "0.104858 GB" ]]
+[[ "$(hp_format_gib 10737418240)" == "10.0000000000 GiB" ]]
+[[ "$(hp_format_gib 11811160064)" == "11.0000000000 GiB" ]]
+[[ "$(hp_format_gib 1207959552)" == "1.1250000000 GiB" ]]
+[[ "$(hp_format_gib 142606336)" == "0.1328125000 GiB" ]]
+[[ "$(hp_format_gib 1)" == "0.0000000009 GiB" ]]
+[[ "$(hp_format_gb 100000000000)" == "100.000000000 GB" ]]
+[[ "$(hp_format_gb 104857600)" == "0.104857600 GB" ]]
+[[ "$(hp_format_gb 1)" == "0.000000001 GB" ]]
+[[ "$(hp_format_hms 1)" == "00:00:01" ]]
+[[ "$(hp_format_hms 30)" == "00:00:30" ]]
+[[ "$(hp_format_hms 159191)" == "44:13:11" ]]
+[[ "$(hp_format_hms 360000)" == "100:00:00" ]]
 
 qualify_help="$($project_dir/qualify-archive.sh --help)"
 [[ "$qualify_help" == *"default: 10 GiB"* ]]

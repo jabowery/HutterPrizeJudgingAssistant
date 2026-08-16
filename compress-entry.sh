@@ -179,7 +179,7 @@ active_container="$(docker create \
   --env "DISK_POLL_SECONDS=$disk_poll_seconds" \
   "$image" /usr/local/bin/run-compressor)"
 
-echo "[$entry_name] compressing offline as UID 65532 (limit: ${time_limit_seconds}s)" >&2
+echo "[$entry_name] compressing offline as UID 65532 (limit: $(hp_format_hms "$time_limit_seconds"))" >&2
 docker start "$active_container" >/dev/null
 docker wait "$active_container" > "$result_dir/container-exit-code"
 docker inspect "$active_container" > "$result_dir/container-inspect.json"

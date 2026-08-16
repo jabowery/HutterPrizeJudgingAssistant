@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$script_dir/lib/entry-env.sh"
+source "$script_dir/lib/resource-units.sh"
 base_image=hutter-prize-judging:local
 entry_dir=""
 output_path=""
@@ -114,7 +115,7 @@ while (( install_attempts < max_install_attempts )); do
   (( install_exit != 0 )) || break
   if (( install_attempts < max_install_attempts )); then
     retry_delay="$((install_attempts * 20))"
-    echo "[$entry_name] dependency image failed with status $install_exit; retrying in ${retry_delay}s" \
+    echo "[$entry_name] dependency image failed with status $install_exit; retrying in $(hp_format_hms "$retry_delay")" \
       | tee -a "$result_dir/install.log" >&2
     sleep "$retry_delay"
   fi

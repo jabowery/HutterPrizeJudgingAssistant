@@ -375,9 +375,11 @@ grep -q '^cgroup_memory_ceiling_bytes=1207959552$' "$identical_compression"
 grep -Eq '^peak_rss_bytes=[1-9][0-9]*$' "$identical_compression"
 grep -q '^command_line_bytes=22$' "$identical_compression"
 grep -q '^command_line_bytes=22$' "$identical_final"
-grep -q '^RAM peak-RSS limit: 0.125 GiB$' "$identical_report"
-grep -q '^Cgroup ceiling: 1.125 GiB$' "$identical_report"
-grep -q '^Disk: 0.104858 GB$' "$identical_report"
+grep -q '^Geekbench 5 T: 8400000; limit per executable: 00:00:30$' \
+  "$identical_report"
+grep -q '^RAM peak-RSS limit: 0.1250000000 GiB$' "$identical_report"
+grep -q '^Cgroup ceiling: 1.1250000000 GiB$' "$identical_report"
+grep -q '^Disk: 0.104857600 GB$' "$identical_report"
 
 run_full Different --serial
 different_final="$(find "$test_dir/results-Different" -name final.env -type f -print -quit)"

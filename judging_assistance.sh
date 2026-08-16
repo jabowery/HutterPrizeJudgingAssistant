@@ -608,7 +608,7 @@ fi
   echo "  generated archive: $generated_archive_bytes"
   echo "  command-line options: $command_line_bytes"
   echo "Improvement over $record_size: $improvement_percent%"
-  echo "Geekbench 5 T: $geekbench_score; limit per executable: ${time_limit_seconds}s"
+  echo "Geekbench 5 T: $geekbench_score; limit per executable: $(hp_format_hms "$time_limit_seconds")"
   echo "RAM peak-RSS limit: $(hp_format_gib "$memory_limit_bytes")"
   echo "Cgroup ceiling: $(hp_format_gib "$cgroup_memory_ceiling_bytes")"
   echo "Disk: $(hp_format_gb "$disk_limit_bytes")"
