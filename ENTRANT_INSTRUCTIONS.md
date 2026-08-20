@@ -154,10 +154,12 @@ The `*_FORMAT` values are:
 - `data`: permitted only for `ARCHIVE_FORMAT` in the separate-decompressor
   form.
 
-UPX normalization is performed by a trusted, pinned unpacker in its own
-offline container. The normalized executable is returned to the host
-orchestrator, hashed/sized/typed, and only then supplied to a new execution
-container. The original packed bytes remain the scored artifact.
+UPX validation is performed by a trusted, pinned unpacker on a scratch copy in
+its own offline container. The scratch copy is discarded. A byte-identical
+copy of the original packed executable is returned to the host orchestrator,
+hashed/sized/typed, and only then supplied to a new execution container. Thus
+the exact packed bytes are both scored and executed; a program may read its own
+executable image without seeing an orchestrator-rewritten version.
 
 ## 3. Source-package layout
 

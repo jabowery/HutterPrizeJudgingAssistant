@@ -37,11 +37,11 @@ esac
 EOF
 chmod 0555 "$test_dir/bin/docker"
 
-readonly host_kernel="$(uname -r)"
+readonly orchestrator_kernel="$(uname -r)"
 readonly apparmor_options='name=apparmor\nname=seccomp,profile=builtin\n'
 readonly apparmor_probe='seccomp=2\nno_new_privs=1\nuid_map=0:0:4294967295\nlsm_context=docker-default (enforce)\n'
 
-FAKE_DOCKER_KERNEL="$host_kernel" \
+FAKE_DOCKER_KERNEL="$orchestrator_kernel" \
 FAKE_DOCKER_SECURITY_OPTIONS="$apparmor_options" \
 FAKE_DOCKER_PROBE="$apparmor_probe" \
 PATH="$test_dir/bin:$PATH" \
@@ -49,6 +49,8 @@ PATH="$test_dir/bin:$PATH" \
     --image test-image --report "$test_dir/pass.env" \
     > "$test_dir/pass.stdout" 2> "$test_dir/pass.stderr"
 grep -q '^preflight_status=PASS$' "$test_dir/pass.env"
+grep -q "^orchestrator_kernel=$orchestrator_kernel$" "$test_dir/pass.env"
+grep -q "^docker_daemon_kernel=$orchestrator_kernel$" "$test_dir/pass.env"
 grep -q '^enforcing_lsm=apparmor$' "$test_dir/pass.env"
 grep -q '^identity_boundary=none$' "$test_dir/pass.env"
 grep -q '^identity_boundary_advisory=present$' "$test_dir/pass.env"
@@ -57,7 +59,7 @@ grep -q 'rootful without UID remapping' "$test_dir/pass.stderr"
 
 remapped_options='name=apparmor\nname=seccomp,profile=builtin\nname=userns\n'
 remapped_probe='seccomp=2\nno_new_privs=1\nuid_map=0:231072:65536\nlsm_context=docker-default (enforce)\n'
-FAKE_DOCKER_KERNEL="$host_kernel" \
+FAKE_DOCKER_KERNEL="$orchestrator_kernel" \
 FAKE_DOCKER_SECURITY_OPTIONS="$remapped_options" \
 FAKE_DOCKER_PROBE="$remapped_probe" \
 PATH="$test_dir/bin:$PATH" \
@@ -68,10 +70,27 @@ grep -q '^identity_boundary=uid-remapped$' "$test_dir/remapped.env"
 grep -q '^identity_boundary_advisory=none$' "$test_dir/remapped.env"
 ! grep -q 'rootful without UID remapping' "$test_dir/remapped.stderr"
 
+# An underlying VM or compatibility environment may expose a Docker kernel
+# different from the orchestration shell's kernel. That relationship is
+# recorded but is not itself a confinement failure.
+virtualized_kernel='6.6.87.2-microsoft-standard-WSL2'
+FAKE_DOCKER_KERNEL="$virtualized_kernel" \
+FAKE_DOCKER_SECURITY_OPTIONS="$apparmor_options" \
+FAKE_DOCKER_PROBE="$apparmor_probe" \
+PATH="$test_dir/bin:$PATH" \
+  "$project_dir/host-security-preflight.sh" \
+    --image test-image --report "$test_dir/virtualized.env" \
+    > "$test_dir/virtualized.stdout" 2> "$test_dir/virtualized.stderr"
+grep -q '^preflight_status=PASS$' "$test_dir/virtualized.env"
+grep -q "^orchestrator_kernel=$orchestrator_kernel$" \
+  "$test_dir/virtualized.env"
+grep -q "^docker_daemon_kernel=$virtualized_kernel$" \
+  "$test_dir/virtualized.env"
+
 expect_failure() {
   local name="$1" options="$2" probe="$3" expected="$4"
   set +e
-  FAKE_DOCKER_KERNEL="$host_kernel" \
+  FAKE_DOCKER_KERNEL="$orchestrator_kernel" \
   FAKE_DOCKER_SECURITY_OPTIONS="$options" \
   FAKE_DOCKER_PROBE="$probe" \
   PATH="$test_dir/bin:$PATH" \
@@ -95,7 +114,7 @@ expect_failure unconfined "$apparmor_options" \
 
 set +e
 FAKE_DOCKER_ENDPOINT='tcp://127.0.0.1:2375' \
-FAKE_DOCKER_KERNEL="$host_kernel" \
+FAKE_DOCKER_KERNEL="$orchestrator_kernel" \
 FAKE_DOCKER_SECURITY_OPTIONS="$apparmor_options" \
 FAKE_DOCKER_PROBE="$apparmor_probe" \
 PATH="$test_dir/bin:$PATH" \

@@ -18,18 +18,20 @@ readonly artifact_format="${ARTIFACT_FORMAT:?ARTIFACT_FORMAT is required}"
 }
 [[ -d /output && ! -L /output ]] || exit 2
 [[ -z "$(find -P /output -mindepth 1 -print -quit)" ]] || {
-  echo "The normalization output directory must be empty." >&2
+  echo "The validation output directory must be empty." >&2
   exit 2
 }
 
 case "$artifact_format" in
   executable)
-    cp --reflink=never -- "$artifact" "/output/$output_name"
     ;;
   upx)
     /opt/upx/upx-5.1.1-amd64_linux/upx --test -- "$artifact"
+    validated_unpacked=/output/.validated-unpacked
     /opt/upx/upx-5.1.1-amd64_linux/upx \
-      --decompress --output="/output/$output_name" -- "$artifact"
+      --decompress --output="$validated_unpacked" -- "$artifact"
+    [[ -f "$validated_unpacked" && ! -L "$validated_unpacked" ]] || exit 2
+    rm -- "$validated_unpacked"
     ;;
   upx-overlay)
     artifact_bytes="$(stat --format='%s' "$artifact")"
@@ -54,9 +56,7 @@ case "$artifact_format" in
     }
     /opt/upx/upx-5.1.1-amd64_linux/upx --decompress \
       --output="$unpacked_prefix" -- "$packed_prefix"
-    cp --reflink=never -- "$unpacked_prefix" "/output/$output_name"
-    tail --bytes="+$((selected_end + 1))" -- "$artifact" \
-      >> "/output/$output_name"
+    [[ -f "$unpacked_prefix" && ! -L "$unpacked_prefix" ]] || exit 2
     rm -- "$packed_prefix" "$unpacked_prefix"
     ;;
   *)
@@ -65,5 +65,10 @@ case "$artifact_format" in
     ;;
 esac
 
+cp --reflink=never -- "$artifact" "/output/$output_name"
 [[ -f "/output/$output_name" && ! -L "/output/$output_name" ]] || exit 2
+cmp --silent -- "$artifact" "/output/$output_name" || {
+  echo "The staged executable differs from the evaluated artifact." >&2
+  exit 2
+}
 chmod 0555 "/output/$output_name"

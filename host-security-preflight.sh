@@ -8,11 +8,12 @@ usage() {
   cat <<'EOF'
 Usage: ./host-security-preflight.sh --image IMAGE --report FILE
 
-Verify the native Docker security boundary before any entrant-provided code is
-executed. The check requires the host Linux kernel, seccomp filtering,
+Verify the Docker Linux security boundary before any entrant-provided code is
+executed. The check requires a Linux Docker daemon, seccomp filtering,
 no-new-privileges, and an enforcing AppArmor or SELinux container profile.
-Rootless Docker or UID remapping is reported as an additional boundary; its
-absence produces a warning.
+The underlying environment may be native or virtualized; this script neither
+requires nor rejects virtualization. Rootless Docker or UID remapping is
+reported as an additional boundary; its absence produces a warning.
 EOF
 }
 
@@ -49,7 +50,7 @@ done
   || die "report path already exists"
 command -v docker >/dev/null || die "Docker is not installed or is not in PATH"
 
-host_kernel="$(uname -r)"
+orchestrator_kernel="$(uname -r)"
 if [[ -n "${DOCKER_HOST:-}" ]]; then
   daemon_endpoint="$DOCKER_HOST"
 else
@@ -75,9 +76,7 @@ security_options="$(docker info \
   || die "could not determine Docker security options"
 
 [[ "$daemon_os" == linux ]] \
-  || die "Docker daemon OS is $daemon_os, not native Linux"
-[[ "$daemon_kernel" == "$host_kernel" ]] \
-  || die "Docker daemon kernel '$daemon_kernel' differs from host kernel '$host_kernel'; VM and remote-daemon execution are not permitted"
+  || die "Docker daemon OS is $daemon_os, not Linux"
 
 seccomp_option=no
 apparmor_option=no
@@ -176,7 +175,7 @@ fi
 
 {
   echo "preflight_status=PASS"
-  echo "host_kernel=$host_kernel"
+  echo "orchestrator_kernel=$orchestrator_kernel"
   echo "docker_daemon_endpoint=$daemon_endpoint"
   echo "docker_daemon_os=$daemon_os"
   echo "docker_daemon_kernel=$daemon_kernel"
@@ -194,10 +193,10 @@ fi
   echo "kernel_patch_currency=unverified"
 } > "$report_path"
 
-echo "Host security preflight PASS: native kernel, seccomp, no-new-privileges, $enforcing_lsm" >&2
+echo "Host security preflight PASS: Linux Docker kernel, seccomp, no-new-privileges, $enforcing_lsm" >&2
 if [[ "$identity_boundary" == none ]]; then
   echo "WARNING: Docker is rootful without UID remapping; container UID 0 maps to host UID 0. Entrant executables still run as UID 65532, but rootless Docker or user-namespace remapping would add an identity boundary." >&2
 else
   echo "Host security preflight: container UID 0 is remapped to host UID $host_uid." >&2
 fi
-echo "WARNING: This preflight cannot prove that the host kernel and Docker Engine contain no unpatched container-escape vulnerability; keep both current with vendor security updates." >&2
+echo "WARNING: This preflight cannot prove that the Docker daemon's Linux kernel and Docker Engine contain no unpatched container-escape vulnerability; keep both current with vendor security updates." >&2

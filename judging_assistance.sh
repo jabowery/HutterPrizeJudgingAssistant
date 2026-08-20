@@ -30,7 +30,7 @@ usage() {
 Usage: ./judging_assistance.sh [OPTIONS] ENTRY_DIR [ENWIK9]
 
 Complete standardized technical judging:
-  1. verify the native Docker security boundary before entrant code can run,
+  1. verify the Docker Linux security boundary before entrant code can run,
   2. calibrate this Docker environment with Geekbench 5,
   3. parse entry.env and unpack its declared source package offline,
   4. run the declared submitted decompressor artifact in its own container,
@@ -322,7 +322,7 @@ echo "Building the common judging image..." >&2
 docker build --tag "$image" "$script_dir" >&2 \
   || stage_fail common_image "Docker image build failed"
 
-echo "Checking the native Docker security boundary..." >&2
+echo "Checking the Docker Linux security boundary..." >&2
 if ! "$script_dir/host-security-preflight.sh" \
     --image "$image" --report "$run_results/host-security.env" \
     2> >(tee "$run_results/host-security.log" >&2); then
@@ -369,24 +369,24 @@ common_limits=(
   --expected-size "$expected_size"
 )
 
-mkdir -p -- "$run_results/normalized/submitted" "$run_results/normalized/rebuilt"
+mkdir -p -- "$run_results/execution/submitted" "$run_results/execution/rebuilt"
 if [[ "$HP_ENTRY_FORMAT" == self-extracting ]]; then
-  submitted_execution_dir="$run_results/normalized/submitted"
-  if ! "$script_dir/normalize-executable.sh" \
+  submitted_execution_dir="$run_results/execution/submitted"
+  if ! "$script_dir/validate-executable.sh" \
       --image "$image" --format "$HP_ARCHIVE_FORMAT" \
-      --results "$run_results/normalization/submitted-archive" \
+      --results "$run_results/validation/submitted-archive" \
       --output "$submitted_execution_dir/$HP_ARCHIVE" \
       "$submission_entry_dir/$HP_ARCHIVE" >/dev/null; then
-    stage_fail submitted_normalization "declared ARCHIVE could not be normalized"
+    stage_fail submitted_validation "declared ARCHIVE could not be validated"
   fi
 else
-  submitted_execution_dir="$run_results/normalized/submitted"
-  if ! "$script_dir/normalize-executable.sh" \
+  submitted_execution_dir="$run_results/execution/submitted"
+  if ! "$script_dir/validate-executable.sh" \
       --image "$image" --format "$HP_DECOMPRESSOR_FORMAT" \
-      --results "$run_results/normalization/submitted-decompressor" \
+      --results "$run_results/validation/submitted-decompressor" \
       --output "$submitted_execution_dir/$HP_DECOMPRESSOR" \
       "$submission_entry_dir/$HP_DECOMPRESSOR" >/dev/null; then
-    stage_fail submitted_normalization "declared DECOMPRESSOR could not be normalized"
+    stage_fail submitted_validation "declared DECOMPRESSOR could not be validated"
   fi
 fi
 
@@ -433,21 +433,21 @@ if ! "$script_dir/build-compressor.sh" \
   stage_fail compressor_build "standard offline build failed"
 fi
 
-compressor_exec_path="$run_results/normalized/rebuilt/$HP_COMPRESSOR"
-if ! "$script_dir/normalize-executable.sh" \
+compressor_exec_path="$run_results/execution/rebuilt/$HP_COMPRESSOR"
+if ! "$script_dir/validate-executable.sh" \
     --image "$image" --format "$HP_COMPRESSOR_FORMAT" \
-    --results "$run_results/normalization/rebuilt-compressor" \
+    --results "$run_results/validation/rebuilt-compressor" \
     --output "$compressor_exec_path" "$compressor_path" >/dev/null; then
-  stage_fail compressor_normalization "rebuilt COMPRESSOR could not be normalized"
+  stage_fail compressor_validation "rebuilt COMPRESSOR could not be validated"
 fi
 decompressor_exec_path=""
 if [[ "$HP_ENTRY_FORMAT" == separate-decompressor ]]; then
-  decompressor_exec_path="$run_results/normalized/rebuilt/$HP_DECOMPRESSOR"
-  if ! "$script_dir/normalize-executable.sh" \
+  decompressor_exec_path="$run_results/execution/rebuilt/$HP_DECOMPRESSOR"
+  if ! "$script_dir/validate-executable.sh" \
       --image "$image" --format "$HP_DECOMPRESSOR_FORMAT" \
-      --results "$run_results/normalization/rebuilt-decompressor" \
+      --results "$run_results/validation/rebuilt-decompressor" \
       --output "$decompressor_exec_path" "$decompressor_path" >/dev/null; then
-    stage_fail decompressor_normalization "rebuilt DECOMPRESSOR could not be normalized"
+    stage_fail decompressor_validation "rebuilt DECOMPRESSOR could not be validated"
   fi
 fi
 
@@ -507,14 +507,14 @@ else
     --results "$run_results/generated-decompression"
     --output "$decompressed_output" "${common_limits[@]}")
   if [[ "$HP_ENTRY_FORMAT" == self-extracting ]]; then
-    generated_execution_dir="$run_results/normalized/generated-archive"
+    generated_execution_dir="$run_results/execution/generated-archive"
     mkdir -p -- "$generated_execution_dir"
-    if ! "$script_dir/normalize-executable.sh" \
+    if ! "$script_dir/validate-executable.sh" \
         --image "$image" --format "$HP_ARCHIVE_FORMAT" \
-        --results "$run_results/normalization/generated-archive" \
+        --results "$run_results/validation/generated-archive" \
         --output "$generated_execution_dir/$HP_ARCHIVE" \
         "$generated_archive" >/dev/null; then
-      stage_fail generated_normalization "generated ARCHIVE could not be normalized"
+      stage_fail generated_validation "generated ARCHIVE could not be validated"
     fi
     generated_qualification+=(--executable "$HP_ARCHIVE")
     generated_qualification_dir="$generated_execution_dir"
@@ -525,7 +525,7 @@ else
       --payload-file "$generated_archive"
       --payload-name "$HP_ARCHIVE"
     )
-    generated_qualification_dir="$run_results/normalized/rebuilt"
+    generated_qualification_dir="$run_results/execution/rebuilt"
   fi
   generated_qualification+=("$generated_qualification_dir" "$reference_path")
   if ! "${generated_qualification[@]}"; then

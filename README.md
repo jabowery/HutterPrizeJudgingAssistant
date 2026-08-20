@@ -6,8 +6,12 @@ enforces the technical resource limits, verifies the result, and records the
 evidence and proposed score for human review. 
 
 Entrant-provided processes run within Docker containers to minimize the risk of
-an adversarial entry. The security model is conditioned on a Linux host whose
-kernel is hardened against [container escape](https://docs.docker.com/engine/security/#linux-kernel-capabilities).
+an adversarial entry. The security model is conditioned on the Linux kernel
+confining those containers being hardened against
+[container escape](https://docs.docker.com/engine/security/#linux-kernel-capabilities).
+The judging system neither requires nor provisions a virtual machine. The
+underlying host environment may provide an additional virtualization boundary,
+but that boundary does not replace the required container-kernel hardening.
 
 The authoritative rules remain the
 [Hutter Prize detailed rules](https://www.hutter1.net/prize/hrules.htm).
@@ -49,10 +53,12 @@ UID 65532 in their execution containers.
 
 Before any entrant-provided code is unpacked, built, or executed, the
 orchestrator runs a host-security preflight. It rejects a non-Linux daemon, a
-nonlocal Docker endpoint, a daemon using a kernel other than the host kernel,
-inactive seccomp filtering, failure to apply `no-new-privileges`, or the absence
-of a verifiably enforcing AppArmor or SELinux container profile. The checks
-follow Docker's documented
+nonlocal Docker endpoint, inactive seccomp filtering, failure to apply
+`no-new-privileges`, or the absence of a verifiably enforcing AppArmor or
+SELinux container profile. It records the orchestration environment's reported
+kernel and the Docker daemon's reported kernel without requiring them to be the
+same. Thus virtualization supplied by the underlying environment is neither a
+prerequisite nor a reason for rejection. The checks follow Docker's documented
 [capability and kernel-isolation model](https://docs.docker.com/engine/security/#linux-kernel-capabilities)
 and verify the resulting test container rather than relying only on daemon
 configuration.
@@ -61,7 +67,7 @@ The preflight records whether rootless Docker or user-namespace remapping maps
 container UID 0 away from host UID 0. Their absence currently produces a
 warning: entrant executables still run as UID 65532, but that is not a separate
 user-namespace boundary. The preflight also warns that local inspection cannot
-prove the absence of an unpatched host-kernel or Docker Engine vulnerability.
+prove the absence of an unpatched Docker-kernel or Docker Engine vulnerability.
 Its complete findings are retained as `host-security.env` in the results tree.
 
 ## Terminology
@@ -117,17 +123,19 @@ Source tar/ZIP extraction, `install.sh`, and `build.sh` are separate containers.
 The source build returns only the executable role(s) declared in `entry.env`.
 Other build outputs never enter a scored runtime.
 
-Executable normalization is also a separate container stage:
+Executable validation and staging is also a separate container stage:
 
-- `FORMAT=executable` copies and evaluates an ordinary executable.
-- `FORMAT=upx` uses the repository-pinned UPX 5.1.1 to unpack a pure UPX file.
-- `FORMAT=upx-overlay` unpacks a UPX executable prefix while preserving its
-  appended data.
+- `FORMAT=executable` stages an ordinary executable unchanged.
+- `FORMAT=upx` uses the repository-pinned UPX 5.1.1 to test and unpack a
+  scratch copy of a pure UPX file.
+- `FORMAT=upx-overlay` finds, tests, and unpacks a scratch copy of the UPX
+  executable prefix without interpreting its appended data.
 
-The normalized executable is returned to the host and evaluated before its
-separate execution container is created. The original submitted/built bytes,
-not the larger normalized copy, remain the scored and reproducibility-comparison
-artifact. The pinned UPX archive has SHA-256
+The scratch copy is discarded. A byte-identical copy of the original artifact
+is returned to the host and evaluated before its separate execution container
+is created. The exact submitted/built bytes are therefore both scored and
+executed. This is required for self-extracting compressors that read their own
+executable image when constructing an archive. The pinned UPX archive has SHA-256
 `1ff660454227861e00772f743f66b900072116b9dc24f6ee28b97cce88a7828a`.
 
 ## Privilege and network phases
@@ -135,13 +143,13 @@ artifact. The pinned UPX archive has SHA-256
 The common judging image may use the network while it is built. For entrant
 code, only `install.sh` runs as root with network access, while constructing a
 dependency image. It receives no source tree. All later entrant stages are
-offline. `build.sh` runs as UID/GID 65532 in its own container; normalization
-uses trusted orchestration tools as UID/GID 65532; every compressor/decompressor
-runs offline as UID/GID 65532 under the formal limits.
+offline. `build.sh` runs as UID/GID 65532 in its own container; executable
+validation uses trusted orchestration tools as UID/GID 65532; every
+compressor/decompressor runs offline as UID/GID 65532 under the formal limits.
 
-Docker shares the host kernel. Namespace and capability restrictions therefore
-do not replace the hardened-kernel condition stated at the beginning of this
-document.
+Entrant containers share the Docker daemon host's Linux kernel. Namespace and
+capability restrictions therefore do not replace the hardened-kernel condition
+stated at the beginning of this document.
 
 ## Resource accounting
 
@@ -180,6 +188,7 @@ does not let an entrant declare its own score.
 ```bash
 ./tests/test-terminology.sh
 ./tests/test-host-security-preflight.sh
+./tests/test-validate-executable.sh
 ./tests/test-example-entry.sh
 ./tests/test-resource-units.sh
 ./tests/test-qualify-archive.sh
@@ -188,11 +197,13 @@ does not let an entrant declare its own score.
 
 The terminology test enforces the human/software distinction above. The
 security-preflight test covers required confinement failures, local-daemon
-enforcement, and remapped and unremapped UID behavior. The Example test checks
-that the successful fixture remains purpose-built and uses portable baseline
-x86-64 compilation. The resource-unit test enforces byte-significant GiB for
-RAM, byte-significant decimal GB for disk, and `HH:MM:SS` durations in
-human-readable output. The integration tests generate their own
+enforcement, and remapped and unremapped UID behavior. The executable-validation
+test checks that pure and overlay UPX artifacts are inspected and then executed
+byte-for-byte unchanged. The Example test checks that the successful fixture
+remains purpose-built and uses portable baseline x86-64 compilation. The
+resource-unit test enforces byte-significant GiB for RAM, byte-significant
+decimal GB for disk, and `HH:MM:SS` durations in human-readable output. The
+integration tests generate their own
 small entries and alternate `entry.env` manifests under a temporary directory.
 Those synthetic entries cover tar and ZIP source packages, both official entry
 forms, parallel cancellation, memory/time/content failures, hidden build

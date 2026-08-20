@@ -11,17 +11,17 @@ active_output_dir=""
 
 usage() {
   cat <<'EOF'
-Usage: ./normalize-executable.sh --format FORMAT --output FILE [OPTIONS] ARTIFACT
+Usage: ./validate-executable.sh --format FORMAT --output FILE [OPTIONS] ARTIFACT
 
-Convert a declared executable artifact into the exact binary that will be
-executed. FORMAT is executable, upx, or upx-overlay. The latter preserves data
-appended to a UPX-packed executable prefix. Normalization occurs offline as UID
-65532 in a dedicated container. The result is returned to the host, where its
-size, hash, and file type are recorded before any execution container sees it.
+Validate a declared executable artifact and stage the exact same bytes for
+execution. FORMAT is executable, upx, or upx-overlay. UPX validation unpacks a
+scratch copy offline as UID 65532 in a dedicated container, but the scratch
+copy is never executed. The original artifact is returned unchanged to the
+host, where its size, hash, and file type are recorded before execution.
 
 Options:
   --format FORMAT   executable, upx, or upx-overlay
-  --output FILE     Required normalized executable destination
+  --output FILE     Required validated execution-copy destination
   --results DIR     Evidence directory (default: ./Results)
   --image NAME      Judging image (default: hutter-prize-judging:local)
 EOF
@@ -64,7 +64,7 @@ mkdir -p -- "$(dirname -- "$output_path")" "$results_path"
 output_path="$(realpath --canonicalize-missing -- "$output_path")"
 results_path="$(realpath -- "$results_path")"
 readonly stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-readonly result_dir="$results_path/$stamp/normalize-$(basename -- "$artifact_path")"
+readonly result_dir="$results_path/$stamp/validate-$(basename -- "$artifact_path")"
 mkdir -p -- "$result_dir"
 active_output_dir="$(mktemp -d)"
 chmod 0777 "$active_output_dir"
@@ -76,26 +76,29 @@ docker run --rm --network none --read-only \
   --mount "type=bind,source=$active_output_dir,target=/output" \
   --env "ARTIFACT_FORMAT=$artifact_format" \
   --env "OUTPUT_NAME=$(basename -- "$output_path")" \
-  "$image" /usr/local/bin/normalize-executable \
+  "$image" /usr/local/bin/validate-executable \
   >"$result_dir/stdout.log" 2>"$result_dir/stderr.log"
 
-normalized="$active_output_dir/$(basename -- "$output_path")"
-[[ -f "$normalized" && ! -L "$normalized" && -x "$normalized" ]] \
-  || die "normalization did not return a regular executable"
-cp --reflink=never -- "$normalized" "$output_path"
+staged="$active_output_dir/$(basename -- "$output_path")"
+[[ -f "$staged" && ! -L "$staged" && -x "$staged" ]] \
+  || die "validation did not return a regular executable"
+cmp --silent -- "$artifact_path" "$staged" \
+  || die "validated execution copy differs from the artifact"
+cp --reflink=never -- "$staged" "$output_path"
 chmod 0555 "$output_path"
 
 {
   echo "artifact_format=$artifact_format"
-  echo "submitted_path=$artifact_path"
-  echo "submitted_bytes=$(stat --format='%s' "$artifact_path")"
-  echo "submitted_sha256=$(sha256sum "$artifact_path" | awk '{print $1}')"
-  echo "normalized_path=$output_path"
-  echo "normalized_bytes=$(stat --format='%s' "$output_path")"
-  echo "normalized_sha256=$(sha256sum "$output_path" | awk '{print $1}')"
-  echo "normalized_file_type=$(file --brief -- "$output_path")"
-  echo "normalization_network=none"
-  echo "normalization_uid=65532"
-} > "$result_dir/normalization.env"
+  echo "artifact_path=$artifact_path"
+  echo "artifact_bytes=$(stat --format='%s' "$artifact_path")"
+  echo "artifact_sha256=$(sha256sum "$artifact_path" | awk '{print $1}')"
+  echo "execution_path=$output_path"
+  echo "execution_bytes=$(stat --format='%s' "$output_path")"
+  echo "execution_sha256=$(sha256sum "$output_path" | awk '{print $1}')"
+  echo "execution_file_type=$(file --brief -- "$output_path")"
+  echo "execution_bytes_identical=yes"
+  echo "validation_network=none"
+  echo "validation_uid=65532"
+} > "$result_dir/validation.env"
 
 printf '%s\n' "$output_path"
