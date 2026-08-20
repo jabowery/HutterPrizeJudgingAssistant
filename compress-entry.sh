@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$script_dir/lib/entry-env.sh"
+source "$script_dir/lib/prize-limits.sh"
 source "$script_dir/lib/resource-units.sh"
 image=hutter-prize-judging:local
 entry_dir=""
@@ -13,8 +14,7 @@ results_path="$script_dir/Results"
 work_root=""
 geekbench_score=""
 time_limit_seconds=""
-memory_limit_bytes=10737418240
-cgroup_memory_headroom_bytes=1073741824
+memory_limit_bytes="$HP_PEAK_RSS_LIMIT_BYTES"
 disk_limit_bytes=100000000000
 disk_poll_seconds=10
 cpu_limit=1
@@ -38,7 +38,6 @@ Options:
   --geekbench-score N        Geekbench 5 single-core score T
   --time-limit-seconds N     Override the 70000/T-hour limit
   --memory-limit-bytes N     Formal peak-RSS limit (default: 10 GiB)
-  --cgroup-headroom-bytes N  Supervisor/cache allowance (default: 1 GiB)
   --disk-limit-bytes N       Default: 100 GB
   --disk-poll-seconds N      Default: 10
   --cpus N                   Default: 1
@@ -74,7 +73,6 @@ while (( $# > 0 )); do
     --geekbench-score) (( $# >= 2 )) || die "$1 requires a value"; geekbench_score="$2"; shift 2 ;;
     --time-limit-seconds) (( $# >= 2 )) || die "$1 requires a value"; time_limit_seconds="$2"; shift 2 ;;
     --memory-limit-bytes) (( $# >= 2 )) || die "$1 requires a value"; memory_limit_bytes="$2"; shift 2 ;;
-    --cgroup-headroom-bytes) (( $# >= 2 )) || die "$1 requires a value"; cgroup_memory_headroom_bytes="$2"; shift 2 ;;
     --disk-limit-bytes) (( $# >= 2 )) || die "$1 requires a value"; disk_limit_bytes="$2"; shift 2 ;;
     --disk-poll-seconds) (( $# >= 2 )) || die "$1 requires a value"; disk_poll_seconds="$2"; shift 2 ;;
     --cpus) (( $# >= 2 )) || die "$1 requires a value"; cpu_limit="$2"; shift 2 ;;
@@ -90,13 +88,10 @@ entry_dir="${positional[0]}"
 compressor_path="${positional[1]}"
 reference_path="${positional[2]}"
 
-for numeric_name in memory_limit_bytes cgroup_memory_headroom_bytes disk_limit_bytes disk_poll_seconds expected_size; do
+for numeric_name in memory_limit_bytes disk_limit_bytes disk_poll_seconds expected_size; do
   value="${!numeric_name}"
   [[ "$value" =~ ^[1-9][0-9]*$ ]] || die "$numeric_name must be a positive integer"
 done
-readonly cgroup_memory_ceiling_bytes="$((memory_limit_bytes + cgroup_memory_headroom_bytes))"
-(( cgroup_memory_ceiling_bytes > memory_limit_bytes )) \
-  || die "invalid cgroup memory ceiling"
 [[ "$cpu_limit" =~ ^[0-9]+([.][0-9]+)?$ ]] \
   && awk -v n="$cpu_limit" 'BEGIN { exit !(n > 0) }' \
   || die "cpus must be positive"
@@ -155,7 +150,7 @@ docker run --rm \
 active_container="$(docker create \
   --network none --read-only \
   --cpus "$cpu_limit" \
-  --memory "$cgroup_memory_ceiling_bytes" --memory-swap "$cgroup_memory_ceiling_bytes" \
+  --memory "$HP_EXECUTION_RAM_BYTES" --memory-swap "$HP_EXECUTION_RAM_BYTES" \
   --pids-limit 4096 --ulimit nofile=65536:65536 \
   --cap-drop ALL \
   --cap-add SETUID --cap-add SETGID --cap-add KILL \
@@ -223,8 +218,7 @@ fi
   echo "time_limit_seconds=$time_limit_seconds"
   echo "cpu_limit=$cpu_limit"
   echo "memory_limit_bytes=$memory_limit_bytes"
-  echo "cgroup_memory_headroom_bytes=$cgroup_memory_headroom_bytes"
-  echo "cgroup_memory_ceiling_bytes=$cgroup_memory_ceiling_bytes"
+  echo "execution_environment_memory_bytes=$HP_EXECUTION_RAM_BYTES"
   echo "peak_rss_kib=$(read_report "$result_dir/peak_rss_kib")"
   echo "peak_rss_bytes=$(read_report "$result_dir/peak_rss_bytes")"
   echo "disk_limit_bytes=$disk_limit_bytes"

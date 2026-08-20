@@ -371,14 +371,18 @@ grep -q '^second_decompression=skipped_identical$' "$identical_final"
 identical_compression="$(find "$test_dir/results-Identical" \
   -name compression.env -type f -print -quit)"
 grep -q '^memory_limit_bytes=134217728$' "$identical_compression"
-grep -q '^cgroup_memory_ceiling_bytes=1207959552$' "$identical_compression"
+grep -q '^execution_environment_memory_bytes=17179869184$' "$identical_compression"
 grep -Eq '^peak_rss_bytes=[1-9][0-9]*$' "$identical_compression"
+identical_compression_inspect="$(find "$test_dir/results-Identical" \
+  -path '*/compression/*/container-inspect.json' -type f -print -quit)"
+grep -q '"Memory": 17179869184' "$identical_compression_inspect"
+grep -q '"MemorySwap": 17179869184' "$identical_compression_inspect"
 grep -q '^command_line_bytes=22$' "$identical_compression"
 grep -q '^command_line_bytes=22$' "$identical_final"
 grep -q '^Geekbench 5 T: 8400000; limit per executable: 00:00:30$' \
   "$identical_report"
 grep -q '^RAM peak-RSS limit: 0.125 GiB$' "$identical_report"
-grep -q '^Cgroup ceiling: 1.125 GiB$' "$identical_report"
+grep -q '^Execution-environment RAM: 16 GiB$' "$identical_report"
 grep -q '^Disk: 0.1048576 GB$' "$identical_report"
 
 run_full Different --serial
@@ -404,7 +408,6 @@ timeout --signal=TERM --kill-after=5 30 \
     --geekbench-score 840000 \
     --expected-size "$fixture_size" \
     --memory-limit-bytes 134217728 \
-    --cgroup-headroom-bytes 134217728 \
     --disk-limit-bytes 104857600 \
     --disk-poll-seconds 1 \
     --record-size 1000 \

@@ -265,5 +265,6 @@ eligibility, and the spirit of the Prize.
   `enwik9` without seeing the reference.
 - No runtime program invokes another executable.
 - UPX or other preparatory representation is declared rather than hidden.
-- Peak RSS is at most 10 GiB, temporary disk at most 100 GB, and every
-  executable invocation meets the calibrated time limit.
+- Every executable runs in the fixed 16 GiB, no-swap execution environment;
+  peak RSS is at most 10 GiB, temporary disk at most 100 GB, and every
+  invocation meets the calibrated time limit.

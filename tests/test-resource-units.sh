@@ -2,10 +2,13 @@
 set -Eeuo pipefail
 
 readonly project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+source "$project_dir/lib/prize-limits.sh"
 source "$project_dir/lib/resource-units.sh"
 
-[[ "$(hp_format_gib 10737418240)" == "10 GiB" ]]
-[[ "$(hp_format_gib 11811160064)" == "11 GiB" ]]
+[[ "$HP_PEAK_RSS_LIMIT_BYTES" == 10737418240 ]]
+[[ "$HP_EXECUTION_RAM_BYTES" == 17179869184 ]]
+[[ "$(hp_format_gib "$HP_PEAK_RSS_LIMIT_BYTES")" == "10 GiB" ]]
+[[ "$(hp_format_gib "$HP_EXECUTION_RAM_BYTES")" == "16 GiB" ]]
 [[ "$(hp_format_gib 1207959552)" == "1.125 GiB" ]]
 [[ "$(hp_format_gib 142606336)" == "0.1328125 GiB" ]]
 [[ "$(hp_format_gib 1)" == "0.0000000009 GiB" ]]
@@ -19,13 +22,11 @@ source "$project_dir/lib/resource-units.sh"
 
 qualify_help="$($project_dir/qualify-archive.sh --help)"
 [[ "$qualify_help" == *"default: 10 GiB"* ]]
-[[ "$qualify_help" == *"default: 1 GiB"* ]]
 [[ "$qualify_help" == *"default: 100 GB"* ]]
 [[ "$qualify_help" != *"10737418240 = 10 GiB"* ]]
 
 assistance_help="$($project_dir/judging_assistance.sh --help)"
 [[ "$assistance_help" == *"default: 10 GiB"* ]]
-[[ "$assistance_help" == *"default: 1 GiB"* ]]
 [[ "$assistance_help" == *"Default: 100 GB"* ]]
 
 echo "resource unit format tests passed"

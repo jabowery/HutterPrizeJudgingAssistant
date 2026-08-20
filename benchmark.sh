@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+source "$script_dir/lib/prize-limits.sh"
 image=hutter-prize-judging:local
 results_path="$script_dir/Results"
 skip_build=false
@@ -47,8 +48,8 @@ set +e
 docker run --rm \
   --network bridge \
   --read-only \
-  --memory 10737418240 \
-  --memory-swap 10737418240 \
+  --memory "$HP_EXECUTION_RAM_BYTES" \
+  --memory-swap "$HP_EXECUTION_RAM_BYTES" \
   --pids-limit 4096 \
   --cap-drop ALL \
   --security-opt no-new-privileges=true \
@@ -132,7 +133,7 @@ image_id="$(docker image inspect "$image" --format '{{.Id}}')"
   echo "score_type=single_core"
   echo "benchmark_cpu_limit=standard_unrestricted_cpu_run"
   echo "judging_cpu_capacity=1"
-  echo "memory_limit_bytes=10737418240"
+  echo "execution_environment_memory_bytes=$HP_EXECUTION_RAM_BYTES"
   echo "network_access=trusted_calibration_only"
   echo "judging_image=$image"
   echo "judging_image_id=$image_id"

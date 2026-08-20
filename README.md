@@ -153,11 +153,12 @@ stated at the beginning of this document.
 
 ## Resource accounting
 
-The default formal limits are 10 GiB peak RSS and 100 GB of temporary disk. A
-higher cgroup ceiling reserves room for the trusted monitor and cache while GNU
-`time` measures the contestant process tree. Human-readable reports use
-byte-significant GiB for RAM, byte-significant decimal GB for disk, and
-`HH:MM:SS` for durations. Insignificant trailing zeroes are omitted;
+The established execution environment has 16 GiB total RAM with no swap. GNU
+`time` enforces a separate 10 GiB peak-RSS limit on the contestant command
+tree, and temporary disk is limited to 100 GB. These are fixed judging
+conditions; execution-environment RAM is not configurable. Human-readable
+reports use byte-significant GiB for RAM, byte-significant decimal GB for
+disk, and `HH:MM:SS` for durations. Insignificant trailing zeroes are omitted;
 machine-readable evidence retains exact integer bytes and seconds. CPU
 capacity, wall time, disk allocation, container inspection, logs, hashes, and
 image IDs are retained under `Results/`.

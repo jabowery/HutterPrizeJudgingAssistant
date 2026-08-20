@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$script_dir/lib/entry-env.sh"
+source "$script_dir/lib/prize-limits.sh"
 source "$script_dir/lib/resource-units.sh"
 base_image=hutter-prize-judging:local
 entry_dir=""
@@ -129,8 +130,8 @@ chmod 1777 "$active_work_dir/run/tmp"
 active_container="$(docker create \
   --network none \
   --read-only \
-  --memory 10737418240 \
-  --memory-swap 10737418240 \
+  --memory "$HP_EXECUTION_RAM_BYTES" \
+  --memory-swap "$HP_EXECUTION_RAM_BYTES" \
   --pids-limit 16384 \
   --ulimit nofile=65536:65536 \
   --cap-drop ALL \

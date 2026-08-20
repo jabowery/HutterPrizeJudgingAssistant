@@ -4,6 +4,7 @@ set -Eeuo pipefail
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly -a original_argv=("$@")
 source "$script_dir/lib/entry-env.sh"
+source "$script_dir/lib/prize-limits.sh"
 source "$script_dir/lib/resource-units.sh"
 image=hutter-prize-judging:local
 entry_dir=""
@@ -11,8 +12,7 @@ reference_path="$script_dir/enwik9"
 results_path="$script_dir/Results"
 work_root=""
 geekbench_score=""
-memory_limit_bytes=10737418240
-cgroup_memory_headroom_bytes=1073741824
+memory_limit_bytes="$HP_PEAK_RSS_LIMIT_BYTES"
 disk_limit_bytes=100000000000
 disk_poll_seconds=10
 cpu_limit=1
@@ -49,7 +49,6 @@ Options:
   --results DIR              Default: ./Results
   --image NAME               Default: hutter-prize-judging:local
   --memory-limit-bytes N     Formal peak-RSS limit (default: 10 GiB)
-  --cgroup-headroom-bytes N  Supervisor/cache allowance (default: 1 GiB)
   --disk-limit-bytes N       Default: 100 GB
   --disk-poll-seconds N      Default: 10
   --cpus N                   Default: 1
@@ -250,7 +249,6 @@ while (( $# > 0 )); do
     --results) (( $# >= 2 )) || die "$1 requires a value"; results_path="$2"; shift 2 ;;
     --image) (( $# >= 2 )) || die "$1 requires a value"; image="$2"; shift 2 ;;
     --memory-limit-bytes) (( $# >= 2 )) || die "$1 requires a value"; memory_limit_bytes="$2"; shift 2 ;;
-    --cgroup-headroom-bytes) (( $# >= 2 )) || die "$1 requires a value"; cgroup_memory_headroom_bytes="$2"; shift 2 ;;
     --disk-limit-bytes) (( $# >= 2 )) || die "$1 requires a value"; disk_limit_bytes="$2"; shift 2 ;;
     --disk-poll-seconds) (( $# >= 2 )) || die "$1 requires a value"; disk_poll_seconds="$2"; shift 2 ;;
     --cpus) (( $# >= 2 )) || die "$1 requires a value"; cpu_limit="$2"; shift 2 ;;
@@ -268,13 +266,10 @@ done
 entry_dir="${positional[0]}"
 (( ${#positional[@]} == 1 )) || reference_path="${positional[1]}"
 
-for numeric_name in memory_limit_bytes cgroup_memory_headroom_bytes disk_limit_bytes disk_poll_seconds record_size expected_size; do
+for numeric_name in memory_limit_bytes disk_limit_bytes disk_poll_seconds record_size expected_size; do
   value="${!numeric_name}"
   [[ "$value" =~ ^[1-9][0-9]*$ ]] || die "$numeric_name must be a positive integer"
 done
-readonly cgroup_memory_ceiling_bytes="$((memory_limit_bytes + cgroup_memory_headroom_bytes))"
-(( cgroup_memory_ceiling_bytes > memory_limit_bytes )) \
-  || die "invalid cgroup memory ceiling"
 [[ "$cpu_limit" =~ ^[0-9]+([.][0-9]+)?$ ]] \
   && awk -v n="$cpu_limit" 'BEGIN { exit !(n > 0) }' \
   || die "cpus must be positive"
@@ -360,7 +355,6 @@ time_limit_seconds="$(awk -v score="$geekbench_score" \
 common_limits=(
   --geekbench-score "$geekbench_score"
   --memory-limit-bytes "$memory_limit_bytes"
-  --cgroup-headroom-bytes "$cgroup_memory_headroom_bytes"
   --disk-limit-bytes "$disk_limit_bytes"
   --disk-poll-seconds "$disk_poll_seconds"
   --cpus "$cpu_limit"
@@ -459,7 +453,6 @@ if ! "$script_dir/compress-entry.sh" \
     --output "$generated_archive" \
     --geekbench-score "$geekbench_score" \
     --memory-limit-bytes "$memory_limit_bytes" \
-    --cgroup-headroom-bytes "$cgroup_memory_headroom_bytes" \
     --disk-limit-bytes "$disk_limit_bytes" \
     --disk-poll-seconds "$disk_poll_seconds" \
     --cpus "$cpu_limit" \
@@ -567,8 +560,7 @@ fi
   echo "geekbench5_score=$geekbench_score"
   echo "time_limit_seconds=$time_limit_seconds"
   echo "memory_limit_bytes=$memory_limit_bytes"
-  echo "cgroup_memory_headroom_bytes=$cgroup_memory_headroom_bytes"
-  echo "cgroup_memory_ceiling_bytes=$cgroup_memory_ceiling_bytes"
+  echo "execution_environment_memory_bytes=$HP_EXECUTION_RAM_BYTES"
   echo "disk_limit_bytes=$disk_limit_bytes"
   echo "job_slots=$job_slots"
   echo "execution_mode=$execution_mode"
@@ -610,7 +602,7 @@ fi
   echo "Improvement over $record_size: $improvement_percent%"
   echo "Geekbench 5 T: $geekbench_score; limit per executable: $(hp_format_hms "$time_limit_seconds")"
   echo "RAM peak-RSS limit: $(hp_format_gib "$memory_limit_bytes")"
-  echo "Cgroup ceiling: $(hp_format_gib "$cgroup_memory_ceiling_bytes")"
+  echo "Execution-environment RAM: $(hp_format_gib "$HP_EXECUTION_RAM_BYTES")"
   echo "Disk: $(hp_format_gb "$disk_limit_bytes")"
   echo "Execution mode: $execution_mode ($job_slots long-running job slots)"
   echo "Results: $run_results"

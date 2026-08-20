@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+source "$script_dir/lib/prize-limits.sh"
 source "$script_dir/lib/resource-units.sh"
 
 image="hutter-prize-judging:local"
@@ -17,8 +18,7 @@ payload_file=""
 payload_name=""
 geekbench_score=""
 time_limit_seconds=""
-memory_limit_bytes=10737418240
-cgroup_memory_headroom_bytes=1073741824
+memory_limit_bytes="$HP_PEAK_RSS_LIMIT_BYTES"
 disk_limit_bytes=100000000000
 disk_poll_seconds=10
 cpu_limit=1
@@ -55,7 +55,6 @@ Options:
   --geekbench-score N        Geekbench 5 score T (required unless time overridden)
   --time-limit-seconds N     Override the official 70000/T-hour limit
   --memory-limit-bytes N     Formal peak-RSS limit (default: 10 GiB)
-  --cgroup-headroom-bytes N  Supervisor/cache allowance (default: 1 GiB)
   --disk-limit-bytes N       Sampled allocated-disk limit (default: 100 GB)
   --disk-poll-seconds N      Disk sampling interval (default: 10)
   --cpus N                   CPU capacity (default: 1)
@@ -169,11 +168,6 @@ while (( $# > 0 )); do
       memory_limit_bytes="$2"
       shift 2
       ;;
-    --cgroup-headroom-bytes)
-      require_value "$@"
-      cgroup_memory_headroom_bytes="$2"
-      shift 2
-      ;;
     --disk-limit-bytes)
       require_value "$@"
       disk_limit_bytes="$2"
@@ -251,14 +245,11 @@ entries_path="${entries_path:-$script_dir/Entries}"
 reference_path="${reference_path:-$script_dir/enwik9}"
 
 for numeric_value in \
-  expected_size memory_limit_bytes cgroup_memory_headroom_bytes disk_limit_bytes \
+  expected_size memory_limit_bytes disk_limit_bytes \
   disk_poll_seconds record_size; do
   value="${!numeric_value}"
   [[ "$value" =~ ^[1-9][0-9]*$ ]] || die "$numeric_value must be a positive integer"
 done
-readonly cgroup_memory_ceiling_bytes="$((memory_limit_bytes + cgroup_memory_headroom_bytes))"
-(( cgroup_memory_ceiling_bytes > memory_limit_bytes )) \
-  || die "invalid cgroup memory ceiling"
 
 if [[ -n "$container_id_file" ]]; then
   [[ ! -e "$container_id_file" && ! -L "$container_id_file" ]] \
@@ -464,8 +455,7 @@ for entry_dir in "${entry_dirs[@]}"; do
     echo "time_limit_seconds=$time_limit_seconds"
     echo "cpu_limit=$cpu_limit"
     echo "memory_limit_bytes=$memory_limit_bytes"
-    echo "cgroup_memory_headroom_bytes=$cgroup_memory_headroom_bytes"
-    echo "cgroup_memory_ceiling_bytes=$cgroup_memory_ceiling_bytes"
+    echo "execution_environment_memory_bytes=$HP_EXECUTION_RAM_BYTES"
     echo "disk_limit_bytes=$disk_limit_bytes"
     echo "work_root=${work_root:-docker-managed-volume}"
     echo "judging_image=$image"
@@ -543,8 +533,8 @@ for entry_dir in "${entry_dirs[@]}"; do
     --network none \
     --read-only \
     --cpus "$cpu_limit" \
-    --memory "$cgroup_memory_ceiling_bytes" \
-    --memory-swap "$cgroup_memory_ceiling_bytes" \
+    --memory "$HP_EXECUTION_RAM_BYTES" \
+    --memory-swap "$HP_EXECUTION_RAM_BYTES" \
     --pids-limit 4096 \
     --ulimit nofile=65536:65536 \
     --cap-drop ALL \
@@ -677,7 +667,7 @@ done
     echo "Time limit: $(hp_format_hms "$time_limit_seconds") (explicit override; no Geekbench score)"
   fi
   echo "Memory peak-RSS limit: $(hp_format_gib "$memory_limit_bytes")"
-  echo "Cgroup ceiling: $(hp_format_gib "$cgroup_memory_ceiling_bytes")"
+  echo "Execution-environment RAM: $(hp_format_gib "$HP_EXECUTION_RAM_BYTES")"
   echo "Disk limit: $(hp_format_gb "$disk_limit_bytes") allocated (sampled every $(hp_format_hms "$disk_poll_seconds"))"
   echo "Work storage: ${work_root:-Docker-managed volume}"
   echo

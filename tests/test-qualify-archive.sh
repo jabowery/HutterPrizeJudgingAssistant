@@ -107,8 +107,12 @@ grep -q $'^Good\tPASS\t' "$good_summary"
 good_report="$(find "$test_dir/good-results" -name report.txt -type f -print -quit)"
 grep -q '^Time limit: 00:00:30 (explicit override; no Geekbench score)$' "$good_report"
 grep -q '^Memory peak-RSS limit: 0.125 GiB$' "$good_report"
-grep -q '^Cgroup ceiling: 1.125 GiB$' "$good_report"
+grep -q '^Execution-environment RAM: 16 GiB$' "$good_report"
 grep -q '^Disk limit: 0.1048576 GB allocated (sampled every 00:00:01)$' "$good_report"
+good_inspect="$(find "$test_dir/good-results" \
+  -name container-inspect.json -type f -print -quit)"
+grep -q '"Memory": 17179869184' "$good_inspect"
+grep -q '"MemorySwap": 17179869184' "$good_inspect"
 
 set +e
 "$project_dir/qualify-archive.sh" \
@@ -185,7 +189,6 @@ set +e
   --expected-size "$fixture_size" \
   --time-limit-seconds 30 \
   --memory-limit-bytes 8388608 \
-  --cgroup-headroom-bytes 134217728 \
   --disk-limit-bytes 104857600 \
   --disk-poll-seconds 1 \
   --results "$test_dir/memory-results" \
