@@ -191,6 +191,7 @@ does not let an entrant declare its own score.
 ./tests/test-validate-executable.sh
 ./tests/test-example-entry.sh
 ./tests/test-resource-units.sh
+./tests/test-entry-env.sh
 ./tests/test-qualify-archive.sh
 ./tests/test-judging-assistance.sh
 ```
@@ -203,7 +204,8 @@ byte-for-byte unchanged. The Example test checks that the successful fixture
 remains purpose-built and uses portable baseline x86-64 compilation. The
 resource-unit test enforces byte-significant GiB for RAM, byte-significant
 decimal GB for disk, and `HH:MM:SS` durations in human-readable output. The
-integration tests generate their own
+manifest test covers `entry.env` parsing, including the single diagnostic
+reported when the manifest is absent. The integration tests generate their own
 small entries and alternate `entry.env` manifests under a temporary directory.
 Those synthetic entries cover tar and ZIP source packages, both official entry
 forms, parallel cancellation, memory/time/content failures, hidden build
