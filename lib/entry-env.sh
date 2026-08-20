@@ -42,7 +42,7 @@ hp_arguments_validate() {
 hp_manifest_load() {
   local manifest="$1" line key value
   [[ -f "$manifest" && ! -L "$manifest" ]] \
-    || hp_manifest_die "missing regular manifest $manifest"
+    || { hp_manifest_die "missing regular manifest $manifest"; return; }
 
   HP_ENTRY_FORMAT=
   HP_EXECUTION_PLATFORM=
