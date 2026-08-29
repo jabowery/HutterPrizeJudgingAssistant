@@ -31,7 +31,9 @@ The work filesystem must have at least the configured 100 GB allowance. By
 default, submitted-archive qualification and rebuilt compression may overlap
 (`--jobs 2`). Use `--serial` when a disputed CPU timing must be repeated without
 concurrent work. `--geekbench-score N` reuses a separately verified Geekbench 5
-single-core score.
+single-core score. Entries that need to unpack, generate, or invoke descendant
+executables use `--runtime-exec-policy process-tree` under the rules in
+[RELAXATION.md](RELAXATION.md); the default is the strict diagnostic policy.
 
 The current Docker worker executes Linux x86/x86-64 entries. The manifest also
 defines Windows x86/x86-64 names so the same orchestration contract can be used
@@ -103,7 +105,7 @@ DECOMPRESSOR + ARCHIVE   -> execution container -> DECOMPRESSED_OUTPUT
 is parsed as data and is never sourced as shell. Unknown keys, duplicate keys,
 paths, and shell syntax are rejected.
 
-## Artifact handoff and one-execution rule
+## Artifact handoff and runtime execution policy
 
 Every system-initiated contestant executable invocation gets a newly created
 Docker container. The container receives only the evaluated executable, its
@@ -112,12 +114,20 @@ no reference corpus, no source/build tree, and no other build outputs.
 
 Each output artifact is copied back to the host judging environment. The
 orchestrator checks that it is a regular file and records its size, SHA-256
-digest, and type before another container can receive it. A trusted `exec-once`
-monitor permits the one declared executable transition and rejects later
-`execve`/`execveat` calls by that program or its descendants. A wrapper
-therefore cannot launch an uncharged helper. A genuine multi-executable
-workflow must expose the intermediate artifact as a declared stage so it can
-be returned and evaluated.
+digest, and type before another container can receive it. The trusted execution
+monitor always traces the complete descendant tree. Under the default `strict`
+policy it permits the one declared executable transition and rejects later
+`execve`/`execveat` calls.
+
+The explicitly selected `process-tree` relaxation permits later executable
+transitions without creating new size or resource allowances. This accommodates
+packed and multi-stage programs whose helpers are decoded or generated from
+already-counted phase inputs. It does not make independently staged entrant
+files free: those remain outside information and must be declared and counted.
+All descendants remain in the original container and cgroup. The report records
+phase-input sizes and hashes, execution events, and hashes of persistent
+runtime executables. Failure only under `strict` is not a failure under the
+selected relaxation.
 
 Source tar/ZIP extraction, `install.sh`, and `build.sh` are separate containers.
 The source build returns only the executable role(s) declared in `entry.env`.
@@ -153,10 +163,14 @@ stated at the beginning of this document.
 
 ## Resource accounting
 
-The established execution environment has 16 GiB total RAM with no swap. GNU
-`time` enforces a separate 10 GiB peak-RSS limit on the contestant command
-tree, and temporary disk is limited to 100 GB. These are fixed judging
-conditions; execution-environment RAM is not configurable. Human-readable
+The established execution environment has 16 GiB total RAM with no swap. The
+10 GiB limit is evaluated against the greater of GNU `time`'s per-process peak
+and a trusted monitor's sampled aggregate RSS across concurrent descendant
+processes. The monitor terminates the complete tracked tree when its aggregate
+sample exceeds the limit. The execution cgroup's broader memory peak is also
+retained as evidence; because that value includes filesystem cache, it is not
+misreported as RSS. Temporary disk is limited to 100 GB. These are fixed
+judging conditions; execution-environment RAM is not configurable. Human-readable
 reports use byte-significant GiB for RAM, byte-significant decimal GB for
 disk, and `HH:MM:SS` for durations. Insignificant trailing zeroes are omitted;
 machine-readable evidence retains exact integer bytes and seconds. CPU
@@ -208,7 +222,8 @@ integration tests generate their own
 small entries and alternate `entry.env` manifests under a temporary directory.
 Those synthetic entries cover tar and ZIP source packages, both official entry
 forms, parallel cancellation, memory/time/content failures, hidden build
-helpers, unknown manifest fields, and rejection of a nested executable launch.
+helpers, unknown manifest fields, strict rejection of a nested executable
+launch, and permitted descendant execution under the process-tree relaxation.
 In particular, the CPU-bound failure uses a one-second limit so that testing
 the time ceiling does not make the suite slow.
 

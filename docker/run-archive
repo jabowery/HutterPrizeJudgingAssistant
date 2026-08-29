@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 export LC_ALL=C
 umask 077
+source /usr/local/lib/hutter-runtime-report
 
 readonly expected_size="${EXPECTED_SIZE:-1000000000}"
 readonly expected_output="${EXPECTED_OUTPUT:?EXPECTED_OUTPUT is required}"
@@ -14,6 +15,7 @@ readonly report_dir=/work/report
 readonly run_dir=/work/run
 readonly executable_name="${EXECUTABLE_NAME:?EXECUTABLE_NAME is required}"
 readonly arguments_name="${ARGUMENTS_NAME:?ARGUMENTS_NAME is required}"
+readonly runtime_exec_policy="${RUNTIME_EXEC_POLICY:-strict}"
 readonly executable="$run_dir/$executable_name"
 readonly proc_self_dir=/opt/contestant-root/proc/self
 
@@ -23,6 +25,7 @@ case "$expected_size:$time_limit_seconds:$memory_limit_bytes:$disk_limit_bytes:$
     exit 2
     ;;
 esac
+hp_runtime_policy_validate "$runtime_exec_policy"
 
 if [[ ! "$expected_output" =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "EXPECTED_OUTPUT must be a plain file name." >&2
@@ -60,14 +63,17 @@ find_output() {
 
 readonly start_epoch="$(date +%s)"
 write_report_value started_epoch "$start_epoch"
+write_report_value runtime_exec_policy "$runtime_exec_policy"
 cd "$run_dir"
 mapfile -t executable_arguments < "$run_dir/$arguments_name"
 
+hp_open_monitor_descriptors "$report_dir"
 set +e
 /usr/bin/time --verbose --output="$report_dir/time.txt" \
   timeout --signal=TERM --kill-after=60 "$time_limit_seconds" \
   chroot --userspec=65532:65532 --groups= \
-    /opt/contestant-root /bin/exec-once /work/run \
+    /opt/contestant-root /bin/exec-once "$runtime_exec_policy" \
+    9 8 7 6 "$memory_limit_bytes" /work/run \
     "./$executable_name" "${executable_arguments[@]}" \
   >"$report_dir/stdout.log" 2>"$report_dir/stderr.log" &
 readonly timed_pid=$!
@@ -105,17 +111,35 @@ set +e
 wait "$timed_pid"
 executable_exit_code=$?
 set -e
+hp_close_monitor_descriptors
 
 readonly finish_epoch="$(date +%s)"
 readonly elapsed_seconds="$((finish_epoch - start_epoch))"
-peak_rss_kib="$(awk -F: '/Maximum resident set size/ {
+gnu_time_peak_rss_kib="$(awk -F: '/Maximum resident set size/ {
   gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2
 }' "$report_dir/time.txt")"
-peak_rss_kib="${peak_rss_kib:-0}"
-[[ "$peak_rss_kib" =~ ^[0-9]+$ ]] || peak_rss_kib=0
-readonly peak_rss_bytes="$((peak_rss_kib * 1024))"
+gnu_time_peak_rss_kib="${gnu_time_peak_rss_kib:-0}"
+[[ "$gnu_time_peak_rss_kib" =~ ^[0-9]+$ ]] || gnu_time_peak_rss_kib=0
+gnu_time_peak_rss_bytes="$((gnu_time_peak_rss_kib * 1024))"
+process_tree_peak_rss_bytes="$(tr -d '\r\n' \
+  < "$report_dir/process_tree_peak_rss_bytes")"
+[[ "$process_tree_peak_rss_bytes" =~ ^[0-9]+$ ]] \
+  || process_tree_peak_rss_bytes=0
+process_tree_memory_exceeded="$(tr -d '\r\n' \
+  < "$report_dir/process_tree_memory_exceeded")"
+[[ "$process_tree_memory_exceeded" == yes ]] \
+  || process_tree_memory_exceeded=no
+peak_rss_bytes="$gnu_time_peak_rss_bytes"
+(( process_tree_peak_rss_bytes <= peak_rss_bytes )) \
+  || peak_rss_bytes="$process_tree_peak_rss_bytes"
+peak_rss_kib="$((peak_rss_bytes / 1024))"
+cgroup_peak_memory_bytes="$(hp_read_cgroup_peak)"
+cgroup_peak_memory_source="$(hp_cgroup_peak_source)"
 
-if [[ "$resource_violation" == none && "$executable_exit_code" == 124 ]]; then
+if [[ "$resource_violation" == none \
+    && "$process_tree_memory_exceeded" == yes ]]; then
+  resource_violation=memory
+elif [[ "$resource_violation" == none && "$executable_exit_code" == 124 ]]; then
   resource_violation=time
 elif [[ "$resource_violation" == none \
     && "$peak_rss_bytes" -gt "$memory_limit_bytes" ]]; then
@@ -140,6 +164,9 @@ write_report_value peak_disk_bytes "$peak_disk_bytes"
 write_report_value peak_apparent_bytes "$peak_apparent_bytes"
 write_report_value peak_rss_kib "$peak_rss_kib"
 write_report_value peak_rss_bytes "$peak_rss_bytes"
+write_report_value gnu_time_peak_rss_bytes "$gnu_time_peak_rss_bytes"
+write_report_value cgroup_peak_memory_bytes "$cgroup_peak_memory_bytes"
+write_report_value cgroup_peak_memory_source "$cgroup_peak_memory_source"
 write_report_value resource_violation "$resource_violation"
 
 if output_name="$(find_output)"; then
@@ -150,6 +177,9 @@ if output_name="$(find_output)"; then
 else
   write_report_value output_status missing_or_ambiguous
 fi
+
+hp_inventory_runtime_executables "$run_dir" \
+  "$report_dir/runtime-executables.tsv" "$executable_name"
 
 chmod 0444 "$report_dir"/*
 chmod 0555 "$report_dir"

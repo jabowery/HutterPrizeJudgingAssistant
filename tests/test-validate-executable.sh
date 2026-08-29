@@ -48,10 +48,11 @@ grep -q '^execution_bytes_identical=yes$' "$overlay_evidence"
 # UPX transfers control within the declared process rather than invoking a
 # second executable, so the packed bytes also satisfy the exec-once monitor.
 docker run --rm --network none \
-  --cap-drop ALL --cap-add SYS_PTRACE \
+  --cap-drop ALL \
   --security-opt no-new-privileges=true \
   --mount "type=bind,source=$test_dir,target=/work/run,readonly" \
   hutter-prize-judging:local \
-  /usr/local/bin/exec-once /work/run ./packed -c true
+  /usr/local/bin/exec-once strict - - - - 10737418240 \
+    /work/run ./packed -c true
 
 echo "executable validation tests passed"

@@ -231,12 +231,27 @@ disabled. The working directory contains only that evaluated executable, its
 argument vector, and its declared input. The reference `enwik9` is present only
 for compression; it is never visible to a decompressor.
 
-An executable may create temporary data, but it may not execute itself, a
-wrapper target, a shell command, or an extracted helper. A trusted monitor
-rejects any later `execve`/`execveat`. If your algorithm genuinely requires a
-second executable, it must be expressed as a distinct declared artifact stage;
-the orchestrator must be able to copy that artifact out, evaluate it, and start
-a new container before it runs.
+The default `strict` runtime policy permits forks and threads but rejects every
+later `execve`/`execveat`. Under that policy, an additional independently
+supplied executable must be expressed as a declared artifact stage so the
+orchestrator can return it across a phase boundary before it runs.
+
+The [runtime process-tree and packed-executable relaxation](RELAXATION.md) may
+instead be selected with:
+
+```text
+--runtime-exec-policy process-tree
+```
+
+That policy permits the declared program and its descendants to execute
+programs unpacked or generated from the already-counted phase inputs. The
+entire descendant tree remains in the same container, one-core cgroup, time
+allowance, aggregate memory accounting domain, disk allowance, and offline
+security boundary. An independently staged helper is still outside information
+and must be declared and counted; a runtime product is not scored a second
+time. The results retain the root invocation, fork/clone/exec/exit events,
+persistent runtime-executable hashes, and exact phase-input hashes for human
+review.
 
 For a self-extracting entry, the archive receives no arguments and must create
 `DECOMPRESSED_OUTPUT`. For a separate-decompressor entry, the declared archive
@@ -263,7 +278,8 @@ eligibility, and the spirit of the Prize.
 - The compressor produces the declared `ARCHIVE`.
 - The appropriate decompressor produces `DECOMPRESSED_OUTPUT` identical to
   `enwik9` without seeing the reference.
-- No runtime program invokes another executable.
+- Select `process-tree` explicitly if a counted program must unpack, generate,
+  or invoke another executable; otherwise it must satisfy `strict`.
 - UPX or other preparatory representation is declared rather than hidden.
 - Every executable runs in the fixed 16 GiB, no-swap execution environment;
   peak RSS is at most 10 GiB, temporary disk at most 100 GB, and every

@@ -18,6 +18,7 @@ mkdir -p \
   "$test_dir/Entries/Different" \
   "$test_dir/Entries/ParallelFail" \
   "$test_dir/Entries/HelperEscape" \
+  "$test_dir/Entries/RuntimeTree" \
   "$test_dir/Entries/BadManifest" \
   "$test_dir/Entries/Separate"
 printf 'full flow fixture\n' > "$test_dir/enwik9"
@@ -91,6 +92,25 @@ WRAPPER
 chmod 0555 comp9
 EOF
   fi
+  if [[ "$compressor_mode" == runtime-tree ]]; then
+    cat > "$package_root/build.sh" <<'EOF'
+#!/bin/sh
+set -eu
+cat > comp9 <<'COMPRESSOR'
+#!/bin/sh
+set -eu
+if [ "${1:-}" = child ]; then
+  printf '%s\n' \
+    '#!/bin/sh' \
+    "printf 'full flow fixture\\n' > data9" \
+    > archive9
+  exit 0
+fi
+exec ./comp9 child
+COMPRESSOR
+chmod 0555 comp9
+EOF
+  fi
   printf '%s\n' -e enwik9 enwik9.comp > "$package_root/comp9.args"
   cat > "$entry_dir/entry.env" <<'EOF'
 ENTRY_FORMAT=self-extracting
@@ -143,6 +163,7 @@ make_entry "$test_dir/Entries/Identical" identical identical tar
 make_entry "$test_dir/Entries/Different" submitted generated zip
 make_entry "$test_dir/Entries/ParallelFail" submitted generated tar slow fail
 make_entry "$test_dir/Entries/HelperEscape" identical identical tar success helper
+make_entry "$test_dir/Entries/RuntimeTree" identical identical tar success runtime-tree
 make_entry "$test_dir/Entries/BadManifest" identical identical tar \
   success success invalid
 cp -a -- "$test_dir/Entries/Identical" "$test_dir/Entries/LfsPointer"
@@ -434,6 +455,15 @@ set -e
 helper_escape_final="$(find "$test_dir/results-HelperEscape" \
   -name final.env -type f -print -quit)"
 grep -q '^failed_stage=compression$' "$helper_escape_final"
+
+run_full RuntimeTree --serial --runtime-exec-policy process-tree
+runtime_tree_final="$(find "$test_dir/results-RuntimeTree" \
+  -name final.env -type f -print -quit)"
+grep -q '^technical_verdict=PASS$' "$runtime_tree_final"
+grep -q '^runtime_exec_policy=process-tree$' "$runtime_tree_final"
+runtime_tree_events="$(find "$test_dir/results-RuntimeTree" \
+  -path '*/compression/*/execution-events.tsv' -type f -print -quit)"
+grep -q $'\texec-permitted\t.*\t./comp9$' "$runtime_tree_events"
 
 # Unknown manifest keys cannot smuggle a second executable alias into the
 # trusted orchestration layer.

@@ -24,6 +24,7 @@ COPY docker/init-compression /usr/local/bin/init-compression
 COPY docker/run-compressor /usr/local/bin/run-compressor
 COPY docker/prepare-entry /usr/local/bin/prepare-entry
 COPY docker/validate-executable /usr/local/bin/validate-executable
+COPY docker/runtime-report /usr/local/lib/hutter-runtime-report
 COPY --from=launcher-build /exec-once /usr/local/bin/exec-once
 
 ADD Geekbench-5.5.1-Linux.tar.gz /opt/geekbench/
@@ -38,6 +39,7 @@ RUN chmod 0555 \
       /usr/local/bin/run-compressor \
       /usr/local/bin/prepare-entry \
       /usr/local/bin/validate-executable \
+      /usr/local/lib/hutter-runtime-report \
       /usr/local/bin/exec-once \
       /opt/upx/upx-5.1.1-amd64_linux/upx \
       /opt/geekbench/Geekbench-5.5.1-Linux/geekbench5 \

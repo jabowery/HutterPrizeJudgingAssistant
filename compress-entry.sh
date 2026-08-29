@@ -18,6 +18,7 @@ memory_limit_bytes="$HP_PEAK_RSS_LIMIT_BYTES"
 disk_limit_bytes=100000000000
 disk_poll_seconds=10
 cpu_limit=1
+runtime_exec_policy=strict
 expected_size=1000000000
 active_container=""
 active_work_dir=""
@@ -41,6 +42,7 @@ Options:
   --disk-limit-bytes N       Default: 100 GB
   --disk-poll-seconds N      Default: 10
   --cpus N                   Default: 1
+  --runtime-exec-policy P    strict or process-tree (default: strict)
   --expected-size N          Expected input bytes (default: 1000000000)
   --image NAME               Default: hutter-prize-judging:local
 EOF
@@ -76,6 +78,7 @@ while (( $# > 0 )); do
     --disk-limit-bytes) (( $# >= 2 )) || die "$1 requires a value"; disk_limit_bytes="$2"; shift 2 ;;
     --disk-poll-seconds) (( $# >= 2 )) || die "$1 requires a value"; disk_poll_seconds="$2"; shift 2 ;;
     --cpus) (( $# >= 2 )) || die "$1 requires a value"; cpu_limit="$2"; shift 2 ;;
+    --runtime-exec-policy) (( $# >= 2 )) || die "$1 requires a value"; runtime_exec_policy="$2"; shift 2 ;;
     --expected-size) (( $# >= 2 )) || die "$1 requires a value"; expected_size="$2"; shift 2 ;;
     --image) (( $# >= 2 )) || die "$1 requires a value"; image="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -95,6 +98,10 @@ done
 [[ "$cpu_limit" =~ ^[0-9]+([.][0-9]+)?$ ]] \
   && awk -v n="$cpu_limit" 'BEGIN { exit !(n > 0) }' \
   || die "cpus must be positive"
+case "$runtime_exec_policy" in
+  strict|process-tree) ;;
+  *) die "runtime-exec-policy must be strict or process-tree" ;;
+esac
 if [[ -n "$time_limit_seconds" ]]; then
   [[ "$time_limit_seconds" =~ ^[1-9][0-9]*$ ]] || die "invalid time limit"
 else
@@ -155,7 +162,6 @@ active_container="$(docker create \
   --cap-drop ALL \
   --cap-add SETUID --cap-add SETGID --cap-add KILL \
   --cap-add DAC_READ_SEARCH --cap-add SETPCAP --cap-add SYS_CHROOT \
-  --cap-add SYS_PTRACE \
   --security-opt no-new-privileges=true \
   --tmpfs /run:rw,nosuid,nodev,noexec,size=16777216 \
   --tmpfs /opt/contestant-root/proc/self:rw,nosuid,nodev,noexec,mode=0755,size=4096 \
@@ -172,6 +178,7 @@ active_container="$(docker create \
   --env "MEMORY_LIMIT_BYTES=$memory_limit_bytes" \
   --env "DISK_LIMIT_BYTES=$disk_limit_bytes" \
   --env "DISK_POLL_SECONDS=$disk_poll_seconds" \
+  --env "RUNTIME_EXEC_POLICY=$runtime_exec_policy" \
   "$image" /usr/local/bin/run-compressor)"
 
 echo "[$entry_name] compressing offline as UID 65532 (limit: $(hp_format_hms "$time_limit_seconds"))" >&2
@@ -217,10 +224,15 @@ fi
   echo "geekbench5_score=${geekbench_score:-not_used_time_override}"
   echo "time_limit_seconds=$time_limit_seconds"
   echo "cpu_limit=$cpu_limit"
+  echo "runtime_exec_policy=$runtime_exec_policy"
   echo "memory_limit_bytes=$memory_limit_bytes"
   echo "execution_environment_memory_bytes=$HP_EXECUTION_RAM_BYTES"
   echo "peak_rss_kib=$(read_report "$result_dir/peak_rss_kib")"
   echo "peak_rss_bytes=$(read_report "$result_dir/peak_rss_bytes")"
+  echo "gnu_time_peak_rss_bytes=$(read_report "$result_dir/gnu_time_peak_rss_bytes")"
+  echo "process_tree_peak_rss_bytes=$(read_report "$result_dir/process_tree_peak_rss_bytes")"
+  echo "cgroup_peak_memory_bytes=$(read_report "$result_dir/cgroup_peak_memory_bytes")"
+  echo "cgroup_peak_memory_source=$(read_report "$result_dir/cgroup_peak_memory_source")"
   echo "disk_limit_bytes=$disk_limit_bytes"
   echo "network=none"
   echo "compressor_name=$HP_COMPRESSOR"

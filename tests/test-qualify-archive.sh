@@ -10,7 +10,9 @@ mkdir -p \
   "$test_dir/Entries/Fork" \
   "$test_dir/Entries/Bad" \
   "$test_dir/Entries/Nested" \
+  "$test_dir/Entries/ProcessTree" \
   "$test_dir/Entries/Memory" \
+  "$test_dir/Entries/AggregateMemory" \
   "$test_dir/Entries/CpuLimit" \
   "$test_dir/work"
 printf 'small judging fixture\n' > "$test_dir/enwik9"
@@ -51,6 +53,15 @@ fi
 printf 'small judging fixture\n' > data9
 EOF
 
+cat > "$test_dir/Entries/ProcessTree/archive9" <<'EOF'
+#!/bin/sh
+if [ "${1:-}" = child ]; then
+  printf 'small judging fixture\n' > data9
+  exit 0
+fi
+exec ./archive9 child
+EOF
+
 cat > "$test_dir/Entries/CpuLimit/archive9" <<'EOF'
 #!/bin/sh
 while :; do
@@ -70,12 +81,30 @@ done
 printf 'small judging fixture\n' > data9
 EOF
 
+cat > "$test_dir/Entries/AggregateMemory/archive9" <<'EOF'
+#!/bin/sh
+allocate_forever() {
+  allocation=x
+  i=0
+  while [ "$i" -lt 22 ]; do
+    allocation=$allocation$allocation
+    i=$((i + 1))
+  done
+  while :; do :; done
+}
+allocate_forever &
+allocate_forever &
+wait
+EOF
+
 chmod 0555 \
   "$test_dir/Entries/Good/archive9" \
   "$test_dir/Entries/Fork/archive9" \
   "$test_dir/Entries/Bad/archive9" \
   "$test_dir/Entries/Nested/archive9" \
+  "$test_dir/Entries/ProcessTree/archive9" \
   "$test_dir/Entries/Memory/archive9" \
+  "$test_dir/Entries/AggregateMemory/archive9" \
   "$test_dir/Entries/CpuLimit/archive9"
 readonly fixture_size="$(stat --format='%s' "$test_dir/enwik9")"
 
@@ -183,6 +212,48 @@ grep -q 'rejected an undeclared additional executable invocation' "$nested_stder
 set +e
 "$project_dir/qualify-archive.sh" \
   --skip-build \
+  --runtime-exec-policy process-tree \
+  --executable archive9 \
+  --output data9 \
+  --entry ProcessTree \
+  --expected-size "$fixture_size" \
+  --time-limit-seconds 30 \
+  --memory-limit-bytes 134217728 \
+  --disk-limit-bytes 104857600 \
+  --disk-poll-seconds 1 \
+  --results "$test_dir/process-tree-results" \
+  "$test_dir/Entries" "$test_dir/enwik9"
+process_tree_exit=$?
+set -e
+if (( process_tree_exit != 0 )); then
+  find "$test_dir/process-tree-results" -type f \
+    \( -name stderr.log -o -name execution-events.tsv \
+       -o -name time.txt -o -name runtime_exec_policy \) \
+    -print -exec sed -n '1,160p' {} \;
+  exit "$process_tree_exit"
+fi
+process_tree_summary="$(find "$test_dir/process-tree-results" \
+  -name summary.tsv -type f -print -quit)"
+grep -q $'^ProcessTree\tPASS\t' "$process_tree_summary"
+process_tree_events="$(find "$test_dir/process-tree-results" \
+  -name execution-events.tsv -type f -print -quit)"
+grep -q $'\texec-permitted\t.*\t./archive9$' "$process_tree_events"
+process_tree_policy="$(find "$test_dir/process-tree-results" \
+  -name runtime_exec_policy -type f -print -quit)"
+grep -qx process-tree "$process_tree_policy"
+process_tree_inputs="$(find "$test_dir/process-tree-results" \
+  -name phase-inputs.tsv -type f -print -quit)"
+grep -q $'^executable\tarchive9\t[0-9][0-9]*\t[0-9a-f]\{64\}$' \
+  "$process_tree_inputs"
+grep -q $'^arguments\tdeclared.arguments\t0\t[0-9a-f]\{64\}$' \
+  "$process_tree_inputs"
+process_tree_peak="$(find "$test_dir/process-tree-results" \
+  -name process_tree_peak_rss_bytes -type f -print -quit)"
+grep -Eq '^[1-9][0-9]*$' "$process_tree_peak"
+
+set +e
+"$project_dir/qualify-archive.sh" \
+  --skip-build \
   --executable archive9 \
   --output data9 \
   --entry Memory \
@@ -201,6 +272,32 @@ memory_summary="$(find "$test_dir/memory-results" -name summary.tsv -type f -pri
 grep -q $'^Memory\tFAIL_MEMORY\t' "$memory_summary"
 memory_peak="$(find "$test_dir/memory-results" -name peak_rss_bytes -type f -print -quit)"
 (( $(<"$memory_peak") > 8388608 ))
+
+set +e
+"$project_dir/qualify-archive.sh" \
+  --skip-build \
+  --executable archive9 \
+  --output data9 \
+  --entry AggregateMemory \
+  --expected-size "$fixture_size" \
+  --time-limit-seconds 30 \
+  --memory-limit-bytes 10485760 \
+  --disk-limit-bytes 104857600 \
+  --disk-poll-seconds 1 \
+  --results "$test_dir/aggregate-memory-results" \
+  "$test_dir/Entries" "$test_dir/enwik9"
+aggregate_memory_exit=$?
+set -e
+(( aggregate_memory_exit != 0 ))
+aggregate_memory_summary="$(find "$test_dir/aggregate-memory-results" \
+  -name summary.tsv -type f -print -quit)"
+grep -q $'^AggregateMemory\tFAIL_MEMORY\t' "$aggregate_memory_summary"
+aggregate_memory_peak="$(find "$test_dir/aggregate-memory-results" \
+  -name process_tree_peak_rss_bytes -type f -print -quit)"
+(( $(<"$aggregate_memory_peak") > 10485760 ))
+aggregate_memory_flag="$(find "$test_dir/aggregate-memory-results" \
+  -name process_tree_memory_exceeded -type f -print -quit)"
+grep -qx yes "$aggregate_memory_flag"
 
 set +e
 "$project_dir/qualify-archive.sh" \

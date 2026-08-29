@@ -16,6 +16,7 @@ memory_limit_bytes="$HP_PEAK_RSS_LIMIT_BYTES"
 disk_limit_bytes=100000000000
 disk_poll_seconds=10
 cpu_limit=1
+runtime_exec_policy=strict
 job_slots=2
 record_size=110793128
 expected_size=1000000000
@@ -52,6 +53,7 @@ Options:
   --disk-limit-bytes N       Default: 100 GB
   --disk-poll-seconds N      Default: 10
   --cpus N                   Default: 1
+  --runtime-exec-policy P    strict or process-tree (default: strict)
   --jobs N                   Concurrent long-running phases: 1 or 2 (default: 2)
   --serial                   Alias for --jobs 1, for disputed CPU timings
   --record-size N            Default: 110793128
@@ -252,6 +254,7 @@ while (( $# > 0 )); do
     --disk-limit-bytes) (( $# >= 2 )) || die "$1 requires a value"; disk_limit_bytes="$2"; shift 2 ;;
     --disk-poll-seconds) (( $# >= 2 )) || die "$1 requires a value"; disk_poll_seconds="$2"; shift 2 ;;
     --cpus) (( $# >= 2 )) || die "$1 requires a value"; cpu_limit="$2"; shift 2 ;;
+    --runtime-exec-policy) (( $# >= 2 )) || die "$1 requires a value"; runtime_exec_policy="$2"; shift 2 ;;
     --jobs) (( $# >= 2 )) || die "$1 requires a value"; job_slots="$2"; shift 2 ;;
     --serial) job_slots=1; shift ;;
     --record-size) (( $# >= 2 )) || die "$1 requires a value"; record_size="$2"; shift 2 ;;
@@ -275,6 +278,10 @@ done
   || die "cpus must be positive"
 [[ "$job_slots" == 1 || "$job_slots" == 2 ]] \
   || die "jobs must be 1 or 2"
+case "$runtime_exec_policy" in
+  strict|process-tree) ;;
+  *) die "runtime-exec-policy must be strict or process-tree" ;;
+esac
 [[ -z "$geekbench_score" || "$geekbench_score" =~ ^[1-9][0-9]*$ ]] \
   || die "invalid Geekbench score"
 [[ -d "$entry_dir" && ! -L "$entry_dir" ]] || die "invalid entry directory: $entry_dir"
@@ -358,6 +365,7 @@ common_limits=(
   --disk-limit-bytes "$disk_limit_bytes"
   --disk-poll-seconds "$disk_poll_seconds"
   --cpus "$cpu_limit"
+  --runtime-exec-policy "$runtime_exec_policy"
   --work-root "$work_root"
   --image "$image"
   --expected-size "$expected_size"
@@ -456,6 +464,7 @@ if ! "$script_dir/compress-entry.sh" \
     --disk-limit-bytes "$disk_limit_bytes" \
     --disk-poll-seconds "$disk_poll_seconds" \
     --cpus "$cpu_limit" \
+    --runtime-exec-policy "$runtime_exec_policy" \
     --expected-size "$expected_size" \
     "$entry_dir" "$compressor_exec_path" "$reference_path"; then
   stage_fail compression "rebuilt compressor failed"
@@ -564,6 +573,7 @@ fi
   echo "disk_limit_bytes=$disk_limit_bytes"
   echo "job_slots=$job_slots"
   echo "execution_mode=$execution_mode"
+  echo "runtime_exec_policy=$runtime_exec_policy"
   echo "entry_format=$HP_ENTRY_FORMAT"
   echo "execution_platform=$HP_EXECUTION_PLATFORM"
   echo "archives_identical=$archives_identical"
@@ -605,5 +615,6 @@ fi
   echo "Execution-environment RAM: $(hp_format_gib "$HP_EXECUTION_RAM_BYTES")"
   echo "Disk: $(hp_format_gb "$disk_limit_bytes")"
   echo "Execution mode: $execution_mode ($job_slots long-running job slots)"
+  echo "Runtime executable policy: $runtime_exec_policy"
   echo "Results: $run_results"
 } | tee "$run_results/final-report.txt"

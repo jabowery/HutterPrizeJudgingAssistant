@@ -22,6 +22,7 @@ memory_limit_bytes="$HP_PEAK_RSS_LIMIT_BYTES"
 disk_limit_bytes=100000000000
 disk_poll_seconds=10
 cpu_limit=1
+runtime_exec_policy=strict
 record_size=110793128
 preflight_only=false
 skip_build=false
@@ -58,6 +59,7 @@ Options:
   --disk-limit-bytes N       Sampled allocated-disk limit (default: 100 GB)
   --disk-poll-seconds N      Disk sampling interval (default: 10)
   --cpus N                   CPU capacity (default: 1)
+  --runtime-exec-policy P    strict or process-tree (default: strict)
   --record-size N            Previous record L (default: 110793128)
   --expected-size N          Reference/output size (default: 1000000000)
   --image NAME               Docker image tag
@@ -183,6 +185,11 @@ while (( $# > 0 )); do
       cpu_limit="$2"
       shift 2
       ;;
+    --runtime-exec-policy)
+      require_value "$@"
+      runtime_exec_policy="$2"
+      shift 2
+      ;;
     --record-size)
       require_value "$@"
       record_size="$2"
@@ -263,6 +270,10 @@ fi
 [[ "$cpu_limit" =~ ^[0-9]+([.][0-9]+)?$ ]] || die "cpus must be a positive number"
 awk -v cpus="$cpu_limit" 'BEGIN { exit !(cpus > 0) }' \
   || die "cpus must be greater than zero"
+case "$runtime_exec_policy" in
+  strict|process-tree) ;;
+  *) die "runtime-exec-policy must be strict or process-tree" ;;
+esac
 
 if [[ -n "$geekbench_score" ]]; then
   [[ "$geekbench_score" =~ ^[1-9][0-9]*$ ]] \
@@ -454,6 +465,7 @@ for entry_dir in "${entry_dirs[@]}"; do
     echo "geekbench5_score=${geekbench_score:-not_used_time_override}"
     echo "time_limit_seconds=$time_limit_seconds"
     echo "cpu_limit=$cpu_limit"
+    echo "runtime_exec_policy=$runtime_exec_policy"
     echo "memory_limit_bytes=$memory_limit_bytes"
     echo "execution_environment_memory_bytes=$HP_EXECUTION_RAM_BYTES"
     echo "disk_limit_bytes=$disk_limit_bytes"
@@ -544,7 +556,6 @@ for entry_dir in "${entry_dirs[@]}"; do
     --cap-add DAC_READ_SEARCH \
     --cap-add SETPCAP \
     --cap-add SYS_CHROOT \
-    --cap-add SYS_PTRACE \
     --security-opt no-new-privileges=true \
     --tmpfs /run:rw,nosuid,nodev,noexec,size=16777216 \
     --tmpfs /opt/contestant-root/proc/self:rw,nosuid,nodev,noexec,mode=0755,size=4096 \
@@ -559,6 +570,7 @@ for entry_dir in "${entry_dirs[@]}"; do
     --env "MEMORY_LIMIT_BYTES=$memory_limit_bytes" \
     --env "DISK_LIMIT_BYTES=$disk_limit_bytes" \
     --env "DISK_POLL_SECONDS=$disk_poll_seconds" \
+    --env "RUNTIME_EXEC_POLICY=$runtime_exec_policy" \
     "$image" /usr/local/bin/run-archive)"
 
   if [[ -n "$container_id_file" ]]; then
@@ -668,6 +680,7 @@ done
   fi
   echo "Memory peak-RSS limit: $(hp_format_gib "$memory_limit_bytes")"
   echo "Execution-environment RAM: $(hp_format_gib "$HP_EXECUTION_RAM_BYTES")"
+  echo "Runtime executable policy: $runtime_exec_policy"
   echo "Disk limit: $(hp_format_gb "$disk_limit_bytes") allocated (sampled every $(hp_format_hms "$disk_poll_seconds"))"
   echo "Work storage: ${work_root:-Docker-managed volume}"
   echo

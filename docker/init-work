@@ -60,4 +60,21 @@ chown 65532:65532 /work/run/tmp
 
 sha256sum "/work/run/$executable_name" | awk '{print $1}' > /work/report/executable.sha256
 stat --format='%s' "/work/run/$executable_name" > /work/report/executable.bytes
-chmod 0400 /work/report/executable.sha256 /work/report/executable.bytes
+sha256sum "/work/run/$arguments_name" | awk '{print $1}' > /work/report/arguments.sha256
+stat --format='%s' "/work/run/$arguments_name" > /work/report/arguments.bytes
+{
+  printf 'role\tname\tbytes\tsha256\n'
+  printf 'executable\t%s\t%s\t%s\n' "$executable_name" \
+    "$(< /work/report/executable.bytes)" "$(< /work/report/executable.sha256)"
+  printf 'arguments\t%s\t%s\t%s\n' "$arguments_name" \
+    "$(< /work/report/arguments.bytes)" "$(< /work/report/arguments.sha256)"
+  if [[ -n "$payload_name" ]]; then
+    payload_bytes="$(stat --format='%s' "/work/run/$payload_name")"
+    payload_sha256="$(sha256sum "/work/run/$payload_name" | awk '{print $1}')"
+    printf 'payload\t%s\t%s\t%s\n' "$payload_name" \
+      "$payload_bytes" "$payload_sha256"
+  fi
+} > /work/report/phase-inputs.tsv
+chmod 0400 /work/report/executable.sha256 /work/report/executable.bytes \
+  /work/report/arguments.sha256 /work/report/arguments.bytes \
+  /work/report/phase-inputs.tsv

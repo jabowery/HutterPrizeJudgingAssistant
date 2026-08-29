@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+
+hp_runtime_policy_validate() {
+  case "$1" in
+    strict|process-tree) ;;
+    *)
+      echo "RUNTIME_EXEC_POLICY must be strict or process-tree." >&2
+      return 2
+      ;;
+  esac
+}
+
+hp_open_monitor_descriptors() {
+  local hp_rr_report_dir="$1"
+  : > "$hp_rr_report_dir/execution-events.tsv"
+  : > "$hp_rr_report_dir/process_tree_peak_rss_bytes"
+  : > "$hp_rr_report_dir/process_tree_memory_exceeded"
+  exec 9</proc
+  exec 8>"$hp_rr_report_dir/execution-events.tsv"
+  exec 7>"$hp_rr_report_dir/process_tree_peak_rss_bytes"
+  exec 6>"$hp_rr_report_dir/process_tree_memory_exceeded"
+  chmod 0400 "$hp_rr_report_dir/execution-events.tsv" \
+    "$hp_rr_report_dir/process_tree_peak_rss_bytes" \
+    "$hp_rr_report_dir/process_tree_memory_exceeded"
+}
+
+hp_close_monitor_descriptors() {
+  exec 9<&-
+  exec 8>&-
+  exec 7>&-
+  exec 6>&-
+}
+
+hp_read_cgroup_peak() {
+  if [[ -r /sys/fs/cgroup/memory.peak ]]; then
+    tr -d '\r\n' < /sys/fs/cgroup/memory.peak
+    return
+  fi
+  if [[ -r /sys/fs/cgroup/memory/memory.max_usage_in_bytes ]]; then
+    tr -d '\r\n' < /sys/fs/cgroup/memory/memory.max_usage_in_bytes
+    return
+  fi
+  printf 'unavailable\n'
+}
+
+hp_cgroup_peak_source() {
+  if [[ -r /sys/fs/cgroup/memory.peak ]]; then
+    printf 'cgroup-v2-memory.peak\n'
+  elif [[ -r /sys/fs/cgroup/memory/memory.max_usage_in_bytes ]]; then
+    printf 'cgroup-v1-memory.max_usage_in_bytes\n'
+  else
+    printf 'unavailable\n'
+  fi
+}
+
+hp_inventory_runtime_executables() {
+  local hp_rr_run_dir="$1"
+  local hp_rr_report_file="$2"
+  local hp_rr_staged_name="$3"
+  local hp_rr_path hp_rr_relative hp_rr_role hp_rr_encoded
+  {
+    printf 'role\tpath_base64\tbytes\tsha256\n'
+    while IFS= read -r -d '' hp_rr_path; do
+      hp_rr_relative="${hp_rr_path#"$hp_rr_run_dir/"}"
+      hp_rr_role=runtime-product
+      [[ "$hp_rr_relative" != "$hp_rr_staged_name" ]] \
+        || hp_rr_role=staged-root
+      hp_rr_encoded="$(printf '%s' "$hp_rr_relative" | base64 --wrap=0)"
+      printf '%s\t%s\t%s\t%s\n' "$hp_rr_role" "$hp_rr_encoded" \
+        "$(stat --format='%s' -- "$hp_rr_path")" \
+        "$(sha256sum -- "$hp_rr_path" | awk '{print $1}')"
+    done < <(find -P "$hp_rr_run_dir" -type f -perm /111 -print0)
+  } > "$hp_rr_report_file"
+}
