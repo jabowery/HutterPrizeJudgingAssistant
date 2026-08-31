@@ -23,14 +23,16 @@ From the repository root:
 
 ```bash
 ./judging_assistance.sh \
+  --cold-cache --serial \
   --work-root /mnt/large-disk/HutterPrizeJudging \
   Entries/NAME ./enwik9
 ```
 
-The work filesystem must have at least the configured 100 GB allowance. By
-default, submitted-archive qualification and rebuilt compression may overlap
-(`--jobs 2`). Use `--serial` when a disputed CPU timing must be repeated without
-concurrent work. `--geekbench-score N` reuses a separately verified Geekbench 5
+The work filesystem must have at least the configured 100 GB allowance. A
+formal one-billion-byte `enwik9` run requires `--cold-cache` and serial
+execution. Diagnostic runs over smaller fixtures may still use the default
+`--jobs 2`; the orchestrator refuses to combine cache eviction with parallel
+execution. `--geekbench-score N` reuses a separately verified Geekbench 5
 single-core score. Entries that need to unpack, generate, or invoke descendant
 executables use `--runtime-exec-policy process-tree` under the rules in
 [RELAXATION.md](RELAXATION.md); the default is the strict diagnostic policy.
@@ -53,6 +55,12 @@ The Docker socket must not be made world-writable; access to it is
 root-equivalent. Contestant executables do not receive that access and run as
 UID 65532 in their execution containers.
 
+Cold-cache control requests `sudo` for the narrow
+`cold-cache-host-helper.sh`, even when the invoking user can already access
+Docker. The helper invokes `sync` and writes `3` to
+`/proc/sys/vm/drop_caches`; the residency verifier then runs without that
+elevation. Root permission is never granted to an entrant container.
+
 Before any entrant-provided code is unpacked, built, or executed, the
 orchestrator runs a host-security preflight. It rejects a non-Linux daemon, a
 nonlocal Docker endpoint, inactive seccomp filtering, failure to apply
@@ -71,6 +79,70 @@ warning: entrant executables still run as UID 65532, but that is not a separate
 user-namespace boundary. The preflight also warns that local inspection cannot
 prove the absence of an unpatched Docker-kernel or Docker Engine vulnerability.
 Its complete findings are retained as `host-security.env` in the results tree.
+
+## Formal cold-cache boundary
+
+Filesystem cache is part of the fixed 16 GiB execution environment. A formal
+run therefore starts each timed container with its large input absent from the
+Linux page cache. For each compression or decompression invocation the
+orchestrator performs this sequence:
+
+1. Build, validate, hash, and stage every phase input.
+2. Create, but do not start, the timed Docker container.
+3. Run `sync` and write `3` to `/proc/sys/vm/drop_caches` on the host Linux
+   kernel.
+4. Use `mincore(2)` to require zero resident pages for the exact input inode.
+5. Start the already-created container.
+
+For compression the checked inode is the `enwik9` bind mount. For a
+self-extracting archive it is the exact copy staged for execution; for the
+separate-decompressor form it is the staged archive payload. Files created
+afresh by the running program do not require pre-run eviction because they
+have new inodes. Hashing is completed before eviction so evidence collection
+does not re-read the target afterward.
+
+The Linux kernel defines value `3` as dropping clean page cache and reclaimable
+dentries and inodes, and explains that `sync` first makes dirty objects eligible
+for eviction. It also warns that this operation can cause performance problems,
+which is why it is confined to controlled formal testing. See the
+[Linux kernel `drop_caches` documentation](https://docs.kernel.org/admin-guide/sysctl/vm.html#drop-caches).
+
+A host-wide lock is held for the complete cache-controlled run. A second
+cache-controlled run is refused, and `--cold-cache` rejects `--jobs 2`, so no
+orchestrator eviction can occur while another formal timed process is running.
+Each timed phase records its target size and SHA-256, inode identity, eviction
+timestamps, page count, resident-page count, and verifier digest in
+`cold-cache.env`. The host conditions are recorded in `cold-cache-host.env`.
+
+### WSL 2
+
+The judging system may run inside a WSL 2 Linux guest; it does not prohibit an
+underlying virtualization boundary. On a 32 GiB Windows machine, configure the
+guest in `%UserProfile%\.wslconfig`, then run `wsl --shutdown` before starting
+it again:
+
+```ini
+[wsl2]
+memory=16GB
+swap=0
+
+[experimental]
+autoMemoryReclaim=disabled
+```
+
+Keep the work directory and `enwik9` on the guest's Linux filesystem, not a
+Windows drive exposed under `/mnt/c`, and retain the fixed 16 GiB Docker cgroup
+limit. The prelaunch check rejects WSL timed-input/work storage on `drvfs`/`9p`
+and rejects nonzero guest swap. WSL does not expose a dependable way for the
+script to verify `autoMemoryReclaim=disabled`, so that setting is reported as
+an external condition rather than silently assumed.
+
+Linux `drop_caches` cannot evict cache below the guest kernel. Consequently, a
+formal WSL result must either use a physical SSD attached directly with
+`wsl --mount` or be accompanied by an empirical check on the actual machine
+showing that a reread after guest cache eviction causes physical-disk reads
+rather than Windows/Hyper-V cache hits. This is a limitation of the underlying
+storage path, not a requirement that the judging system provision a VM.
 
 ## Terminology
 
@@ -206,6 +278,7 @@ does not let an entrant declare its own score.
 ./tests/test-validate-executable.sh
 ./tests/test-example-entry.sh
 ./tests/test-resource-units.sh
+./tests/test-cold-cache.sh
 ./tests/test-qualify-archive.sh
 ./tests/test-judging-assistance.sh
 ```
@@ -218,7 +291,9 @@ byte-for-byte unchanged. The Example test checks that the successful fixture
 remains purpose-built and uses portable baseline x86-64 compilation. The
 resource-unit test enforces byte-significant GiB for RAM, byte-significant
 decimal GB for disk, and `HH:MM:SS` durations in human-readable output. The
-integration tests generate their own
+The cold-cache test builds and exercises the trusted `mincore(2)` verifier and
+checks the formal-run CLI invariants without evicting the development host's
+cache. The integration tests generate their own
 small entries and alternate `entry.env` manifests under a temporary directory.
 Those synthetic entries cover tar and ZIP source packages, both official entry
 forms, parallel cancellation, memory/time/content failures, hidden build

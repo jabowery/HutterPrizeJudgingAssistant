@@ -95,8 +95,8 @@ Platform programs used merely as runtime or launch machinery, such as a dynamic
 loader or command interpreter, are not entrant artifacts. They MUST NOT be used
 as unaccounted algorithmic compressors, preprocessors, dictionaries, models, or
 other sources of benchmark-relevant information. The judging assistant SHOULD
-record descendant executable paths and digests where practicable so human
-judges can review this distinction.
+record descendant executable paths and digests where practicable for review by
+human Hutter Prize officials.
 
 ## Size accounting
 

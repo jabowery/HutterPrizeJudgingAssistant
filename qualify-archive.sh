@@ -4,6 +4,7 @@ set -Eeuo pipefail
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$script_dir/lib/prize-limits.sh"
 source "$script_dir/lib/resource-units.sh"
+source "$script_dir/lib/cold-cache.sh"
 
 image="hutter-prize-judging:local"
 entries_path=""
@@ -28,6 +29,8 @@ preflight_only=false
 skip_build=false
 keep_work=false
 container_id_file=""
+cold_cache=false
+cold_cache_helper=""
 declare -a selected_entries=()
 
 active_container=""
@@ -60,6 +63,7 @@ Options:
   --disk-poll-seconds N      Disk sampling interval (default: 10)
   --cpus N                   CPU capacity (default: 1)
   --runtime-exec-policy P    strict or process-tree (default: strict)
+  --cold-cache               Evict and verify the exact staged input before start
   --record-size N            Previous record L (default: 110793128)
   --expected-size N          Reference/output size (default: 1000000000)
   --image NAME               Docker image tag
@@ -67,6 +71,7 @@ Options:
   --preflight-only           Inventory and score without executing submissions
   --keep-work                Keep per-entry Docker volumes for inspection
   --container-id-file FILE   Internal active-container handoff for parent cleanup
+  --cold-cache-helper FILE   Internal trusted residency-verifier handoff
   -h, --help                 Show this help
 
 The second positional argument is equivalent to --enwik9. The reference is
@@ -190,6 +195,15 @@ while (( $# > 0 )); do
       runtime_exec_policy="$2"
       shift 2
       ;;
+    --cold-cache)
+      cold_cache=true
+      shift
+      ;;
+    --cold-cache-helper)
+      require_value "$@"
+      cold_cache_helper="$2"
+      shift 2
+      ;;
     --record-size)
       require_value "$@"
       record_size="$2"
@@ -258,6 +272,16 @@ for numeric_value in \
   [[ "$value" =~ ^[1-9][0-9]*$ ]] || die "$numeric_value must be a positive integer"
 done
 
+if [[ "$preflight_only" != true && "$expected_size" == 1000000000 \
+    && "$cold_cache" != true ]]; then
+  die "formal enwik9 runs require --cold-cache"
+fi
+if [[ "$cold_cache" == true && "$preflight_only" == true ]]; then
+  die "--cold-cache cannot be combined with --preflight-only"
+fi
+if [[ -n "$cold_cache_helper" && "$cold_cache" != true ]]; then
+  die "--cold-cache-helper requires --cold-cache"
+fi
 if [[ -n "$container_id_file" ]]; then
   [[ ! -e "$container_id_file" && ! -L "$container_id_file" ]] \
     || die "container ID file already exists: $container_id_file"
@@ -348,7 +372,24 @@ if [[ "$preflight_only" != true ]]; then
     work_root="$(realpath -- "$work_root")"
     work_filesystem_path="$work_root"
   else
+    [[ "$cold_cache" != true ]] \
+      || die "--cold-cache requires --work-root so the exact staged inode can be verified"
     work_filesystem_path="$(docker info --format '{{.DockerRootDir}}')"
+  fi
+
+  if [[ "$cold_cache" == true ]]; then
+    hp_cold_cache_validate_work_root "$work_root" || exit 2
+    hp_cold_cache_acquire_lock "$script_dir" || exit 2
+    if [[ -z "$cold_cache_helper" ]]; then
+      cold_cache_helper="$run_results/trusted-tools/mincore-residency"
+      hp_cold_cache_extract_mincore_helper "$image" "$cold_cache_helper" \
+        || die "could not extract the trusted residency verifier"
+    else
+      [[ -f "$cold_cache_helper" && ! -L "$cold_cache_helper" \
+          && -x "$cold_cache_helper" ]] \
+        || die "invalid cold-cache helper: $cold_cache_helper"
+      cold_cache_helper="$(realpath -- "$cold_cache_helper")"
+    fi
   fi
 
   work_available_bytes="$(df --block-size=1 --output=avail "$work_filesystem_path" \
@@ -466,6 +507,7 @@ for entry_dir in "${entry_dirs[@]}"; do
     echo "time_limit_seconds=$time_limit_seconds"
     echo "cpu_limit=$cpu_limit"
     echo "runtime_exec_policy=$runtime_exec_policy"
+    echo "cold_cache=$cold_cache"
     echo "memory_limit_bytes=$memory_limit_bytes"
     echo "execution_environment_memory_bytes=$HP_EXECUTION_RAM_BYTES"
     echo "disk_limit_bytes=$disk_limit_bytes"
@@ -541,6 +583,26 @@ for entry_dir in "${entry_dirs[@]}"; do
     --env "PAYLOAD_NAME=$payload_name" \
     "$image" /usr/local/bin/init-work
 
+  cold_cache_target=""
+  cold_cache_target_role=""
+  cold_cache_target_bytes=""
+  cold_cache_target_sha256=""
+  if [[ "$cold_cache" == true ]]; then
+    if [[ -n "$payload_file" ]]; then
+      cold_cache_target="$active_work_dir/run/$payload_name"
+      cold_cache_target_role=payload
+    else
+      cold_cache_target="$active_work_dir/run/$archive_name"
+      cold_cache_target_role=executable_archive
+    fi
+    [[ -f "$cold_cache_target" && ! -L "$cold_cache_target" ]] \
+      || die "exact staged cold-cache target is unavailable: $cold_cache_target"
+    cold_cache_target_bytes="$(stat --format='%s' -- "$cold_cache_target")"
+    cold_cache_target_sha256="$(sha256sum -- "$cold_cache_target" | awk '{print $1}')"
+    hp_cold_cache_refresh_privilege \
+      || die "could not authorize the imminent host cache eviction"
+  fi
+
   active_container="$(docker create \
     --network none \
     --read-only \
@@ -578,6 +640,14 @@ for entry_dir in "${entry_dirs[@]}"; do
   fi
 
   echo "[$entry_name] running without network/reference access (limit: $(hp_format_hms "$time_limit_seconds"))"
+  if [[ "$cold_cache" == true ]]; then
+    echo "[$entry_name] evicting and verifying the staged $cold_cache_target_role before container start"
+    hp_cold_cache_run "$script_dir" "$cold_cache_helper" \
+      "$cold_cache_target" "$entry_results/cold-cache.env" \
+      "$cold_cache_target_bytes" "$cold_cache_target_sha256" \
+      "$cold_cache_target_role" \
+      || die "cold-cache eviction or zero-residency verification failed"
+  fi
   docker start "$active_container" >/dev/null
   docker wait "$active_container" > "$entry_results/container-exit-code"
   if ! docker inspect "$active_container" \
@@ -680,6 +750,7 @@ done
   fi
   echo "Memory peak-RSS limit: $(hp_format_gib "$memory_limit_bytes")"
   echo "Execution-environment RAM: $(hp_format_gib "$HP_EXECUTION_RAM_BYTES")"
+  echo "Cold cache: $cold_cache"
   echo "Runtime executable policy: $runtime_exec_policy"
   echo "Disk limit: $(hp_format_gb "$disk_limit_bytes") allocated (sampled every $(hp_format_hms "$disk_poll_seconds"))"
   echo "Work storage: ${work_root:-Docker-managed volume}"

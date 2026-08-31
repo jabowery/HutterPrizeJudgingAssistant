@@ -5,7 +5,10 @@ RUN apt-get update \
     && apt-get install --yes --no-install-recommends gcc libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 COPY docker/exec-once.c /src/exec-once.c
-RUN gcc -O2 -Wall -Wextra -Werror /src/exec-once.c -o /exec-once
+COPY docker/mincore-residency.c /src/mincore-residency.c
+RUN gcc -O2 -Wall -Wextra -Werror /src/exec-once.c -o /exec-once \
+    && gcc -O2 -Wall -Wextra -Werror \
+         /src/mincore-residency.c -o /mincore-residency
 
 FROM ubuntu:22.04@sha256:58b87898e82351c6cf9cf5b9f3c20257bb9e2dcf33af051e12ce532d7f94e3fe
 
@@ -26,6 +29,7 @@ COPY docker/prepare-entry /usr/local/bin/prepare-entry
 COPY docker/validate-executable /usr/local/bin/validate-executable
 COPY docker/runtime-report /usr/local/lib/hutter-runtime-report
 COPY --from=launcher-build /exec-once /usr/local/bin/exec-once
+COPY --from=launcher-build /mincore-residency /usr/local/bin/mincore-residency
 
 ADD Geekbench-5.5.1-Linux.tar.gz /opt/geekbench/
 ADD UPX-5.1.1-amd64_linux.tar.xz /opt/upx/
@@ -41,6 +45,7 @@ RUN chmod 0555 \
       /usr/local/bin/validate-executable \
       /usr/local/lib/hutter-runtime-report \
       /usr/local/bin/exec-once \
+      /usr/local/bin/mincore-residency \
       /opt/upx/upx-5.1.1-amd64_linux/upx \
       /opt/geekbench/Geekbench-5.5.1-Linux/geekbench5 \
       /opt/geekbench/Geekbench-5.5.1-Linux/geekbench_x86_64 \

@@ -6,6 +6,7 @@ readonly -a original_argv=("$@")
 source "$script_dir/lib/entry-env.sh"
 source "$script_dir/lib/prize-limits.sh"
 source "$script_dir/lib/resource-units.sh"
+source "$script_dir/lib/cold-cache.sh"
 image=hutter-prize-judging:local
 entry_dir=""
 reference_path="$script_dir/enwik9"
@@ -20,6 +21,8 @@ runtime_exec_policy=strict
 job_slots=2
 record_size=110793128
 expected_size=1000000000
+cold_cache=false
+cold_cache_helper=""
 active_stage_root=""
 qualification_pid=""
 qualification_container_file=""
@@ -56,6 +59,7 @@ Options:
   --runtime-exec-policy P    strict or process-tree (default: strict)
   --jobs N                   Concurrent long-running phases: 1 or 2 (default: 2)
   --serial                   Alias for --jobs 1, for disputed CPU timings
+  --cold-cache               Required for a formal enwik9 run; requires --serial
   --record-size N            Default: 110793128
   --expected-size N          Expected corpus bytes (default: 1000000000)
 EOF
@@ -257,6 +261,7 @@ while (( $# > 0 )); do
     --runtime-exec-policy) (( $# >= 2 )) || die "$1 requires a value"; runtime_exec_policy="$2"; shift 2 ;;
     --jobs) (( $# >= 2 )) || die "$1 requires a value"; job_slots="$2"; shift 2 ;;
     --serial) job_slots=1; shift ;;
+    --cold-cache) cold_cache=true; shift ;;
     --record-size) (( $# >= 2 )) || die "$1 requires a value"; record_size="$2"; shift 2 ;;
     --expected-size) (( $# >= 2 )) || die "$1 requires a value"; expected_size="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -278,6 +283,12 @@ done
   || die "cpus must be positive"
 [[ "$job_slots" == 1 || "$job_slots" == 2 ]] \
   || die "jobs must be 1 or 2"
+if [[ "$expected_size" == 1000000000 && "$cold_cache" != true ]]; then
+  die "formal enwik9 runs require --cold-cache"
+fi
+if [[ "$cold_cache" == true && "$job_slots" != 1 ]]; then
+  die "--cold-cache refuses parallel execution; also specify --serial or --jobs 1"
+fi
 case "$runtime_exec_policy" in
   strict|process-tree) ;;
   *) die "runtime-exec-policy must be strict or process-tree" ;;
@@ -293,6 +304,10 @@ entry_dir="$(realpath -- "$entry_dir")"
 readonly submission_entry_dir="$entry_dir"
 reference_path="$(realpath -- "$reference_path")"
 work_root="$(realpath -- "$work_root")"
+if [[ "$cold_cache" == true ]]; then
+  hp_cold_cache_validate_work_root "$work_root" "$reference_path" || exit 2
+  hp_cold_cache_acquire_lock "$script_dir" || exit 2
+fi
 [[ "$(stat --format='%s' "$reference_path")" == "$expected_size" ]] \
   || die "enwik9 must be exactly $expected_size bytes"
 
@@ -323,6 +338,28 @@ qualification_container_file="$run_results/qualification-container-id"
 echo "Building the common judging image..." >&2
 docker build --tag "$image" "$script_dir" >&2 \
   || stage_fail common_image "Docker image build failed"
+
+if [[ "$cold_cache" == true ]]; then
+  cold_cache_helper="$run_results/trusted-tools/mincore-residency"
+  if ! hp_cold_cache_extract_mincore_helper "$image" "$cold_cache_helper"; then
+    stage_fail cold_cache_setup "could not extract the trusted residency verifier"
+  fi
+  host_kernel="$(uname -r)"
+  {
+    echo "cold_cache=enabled"
+    echo "execution_mode=serial"
+    echo "host_kernel=$host_kernel"
+    if [[ "${host_kernel,,}" == *microsoft* ]]; then
+      echo "wsl=yes"
+      echo "lower_storage_cache=requires_external_verification"
+    else
+      echo "wsl=no"
+      echo "lower_storage_cache=not_applicable"
+    fi
+    echo "work_root=$work_root"
+    echo "mincore_helper_sha256=$(sha256sum "$cold_cache_helper" | awk '{print $1}')"
+  } > "$run_results/cold-cache-host.env"
+fi
 
 echo "Checking the Docker Linux security boundary..." >&2
 if ! "$script_dir/host-security-preflight.sh" \
@@ -370,6 +407,9 @@ common_limits=(
   --image "$image"
   --expected-size "$expected_size"
 )
+if [[ "$cold_cache" == true ]]; then
+  common_limits+=(--cold-cache --cold-cache-helper "$cold_cache_helper")
+fi
 
 mkdir -p -- "$run_results/execution/submitted" "$run_results/execution/rebuilt"
 if [[ "$HP_ENTRY_FORMAT" == self-extracting ]]; then
@@ -455,6 +495,10 @@ fi
 
 generated_archive="$run_results/generated/$HP_ARCHIVE"
 echo "[$entry_name] starting rebuilt-compressor compression ($execution_mode mode)" >&2
+compression_cold_options=()
+if [[ "$cold_cache" == true ]]; then
+  compression_cold_options=(--cold-cache --cold-cache-helper "$cold_cache_helper")
+fi
 if ! "$script_dir/compress-entry.sh" \
     --image "$image" --work-root "$work_root" \
     --results "$run_results/compression" \
@@ -466,6 +510,7 @@ if ! "$script_dir/compress-entry.sh" \
     --cpus "$cpu_limit" \
     --runtime-exec-policy "$runtime_exec_policy" \
     --expected-size "$expected_size" \
+    "${compression_cold_options[@]}" \
     "$entry_dir" "$compressor_exec_path" "$reference_path"; then
   stage_fail compression "rebuilt compressor failed"
 fi
@@ -574,6 +619,7 @@ fi
   echo "job_slots=$job_slots"
   echo "execution_mode=$execution_mode"
   echo "runtime_exec_policy=$runtime_exec_policy"
+  echo "cold_cache=$cold_cache"
   echo "entry_format=$HP_ENTRY_FORMAT"
   echo "execution_platform=$HP_EXECUTION_PLATFORM"
   echo "archives_identical=$archives_identical"
@@ -616,5 +662,6 @@ fi
   echo "Disk: $(hp_format_gb "$disk_limit_bytes")"
   echo "Execution mode: $execution_mode ($job_slots long-running job slots)"
   echo "Runtime executable policy: $runtime_exec_policy"
+  echo "Cold cache: $cold_cache"
   echo "Results: $run_results"
 } | tee "$run_results/final-report.txt"

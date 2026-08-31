@@ -5,6 +5,7 @@ readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$script_dir/lib/entry-env.sh"
 source "$script_dir/lib/prize-limits.sh"
 source "$script_dir/lib/resource-units.sh"
+source "$script_dir/lib/cold-cache.sh"
 image=hutter-prize-judging:local
 entry_dir=""
 compressor_path=""
@@ -22,6 +23,8 @@ runtime_exec_policy=strict
 expected_size=1000000000
 active_container=""
 active_work_dir=""
+cold_cache=false
+cold_cache_helper=""
 
 usage() {
   cat <<'EOF'
@@ -43,6 +46,7 @@ Options:
   --disk-poll-seconds N      Default: 10
   --cpus N                   Default: 1
   --runtime-exec-policy P    strict or process-tree (default: strict)
+  --cold-cache               Evict and verify enwik9 before container start
   --expected-size N          Expected input bytes (default: 1000000000)
   --image NAME               Default: hutter-prize-judging:local
 EOF
@@ -79,6 +83,8 @@ while (( $# > 0 )); do
     --disk-poll-seconds) (( $# >= 2 )) || die "$1 requires a value"; disk_poll_seconds="$2"; shift 2 ;;
     --cpus) (( $# >= 2 )) || die "$1 requires a value"; cpu_limit="$2"; shift 2 ;;
     --runtime-exec-policy) (( $# >= 2 )) || die "$1 requires a value"; runtime_exec_policy="$2"; shift 2 ;;
+    --cold-cache) cold_cache=true; shift ;;
+    --cold-cache-helper) (( $# >= 2 )) || die "$1 requires a value"; cold_cache_helper="$2"; shift 2 ;;
     --expected-size) (( $# >= 2 )) || die "$1 requires a value"; expected_size="$2"; shift 2 ;;
     --image) (( $# >= 2 )) || die "$1 requires a value"; image="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -95,6 +101,12 @@ for numeric_name in memory_limit_bytes disk_limit_bytes disk_poll_seconds expect
   value="${!numeric_name}"
   [[ "$value" =~ ^[1-9][0-9]*$ ]] || die "$numeric_name must be a positive integer"
 done
+if [[ "$expected_size" == 1000000000 && "$cold_cache" != true ]]; then
+  die "formal enwik9 runs require --cold-cache"
+fi
+if [[ -n "$cold_cache_helper" && "$cold_cache" != true ]]; then
+  die "--cold-cache-helper requires --cold-cache"
+fi
 [[ "$cpu_limit" =~ ^[0-9]+([.][0-9]+)?$ ]] \
   && awk -v n="$cpu_limit" 'BEGIN { exit !(n > 0) }' \
   || die "cpus must be positive"
@@ -125,6 +137,10 @@ entry_dir="$(realpath -- "$entry_dir")"
 compressor_path="$(realpath -- "$compressor_path")"
 reference_path="$(realpath -- "$reference_path")"
 work_root="$(realpath -- "$work_root")"
+if [[ "$cold_cache" == true ]]; then
+  hp_cold_cache_validate_work_root "$work_root" "$reference_path" || exit 2
+  hp_cold_cache_acquire_lock "$script_dir" || exit 2
+fi
 [[ "$(stat --format='%s' "$reference_path")" == "$expected_size" ]] \
   || die "enwik9 must be exactly $expected_size bytes"
 available_bytes="$(df --block-size=1 --output=avail "$work_root" | awk 'NR == 2 { print $1 }')"
@@ -138,6 +154,18 @@ readonly stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 readonly entry_name="$(basename -- "$entry_dir")"
 readonly result_dir="$results_path/$stamp/compression-$entry_name"
 mkdir -p -- "$result_dir"
+if [[ "$cold_cache" == true ]]; then
+  if [[ -z "$cold_cache_helper" ]]; then
+    cold_cache_helper="$result_dir/trusted-tools/mincore-residency"
+    hp_cold_cache_extract_mincore_helper "$image" "$cold_cache_helper" \
+      || die "could not extract the trusted residency verifier"
+  else
+    [[ -f "$cold_cache_helper" && ! -L "$cold_cache_helper" \
+        && -x "$cold_cache_helper" ]] \
+      || die "invalid cold-cache helper: $cold_cache_helper"
+    cold_cache_helper="$(realpath -- "$cold_cache_helper")"
+  fi
+fi
 active_work_dir="$(mktemp -d -- "$work_root/hutter-compress-$stamp.XXXXXX")"
 chmod 0755 "$active_work_dir"
 
@@ -153,6 +181,15 @@ docker run --rm \
   --env "INPUT_NAME=enwik9" \
   --env "OUTPUT_NAME=$HP_ARCHIVE" \
   "$image" /usr/local/bin/init-compression
+
+cold_cache_target_bytes=""
+cold_cache_target_sha256=""
+if [[ "$cold_cache" == true ]]; then
+  cold_cache_target_bytes="$(stat --format='%s' -- "$reference_path")"
+  cold_cache_target_sha256="$(sha256sum -- "$reference_path" | awk '{print $1}')"
+  hp_cold_cache_refresh_privilege \
+    || die "could not authorize the imminent host cache eviction"
+fi
 
 active_container="$(docker create \
   --network none --read-only \
@@ -182,6 +219,13 @@ active_container="$(docker create \
   "$image" /usr/local/bin/run-compressor)"
 
 echo "[$entry_name] compressing offline as UID 65532 (limit: $(hp_format_hms "$time_limit_seconds"))" >&2
+if [[ "$cold_cache" == true ]]; then
+  echo "[$entry_name] evicting and verifying enwik9 before container start" >&2
+  hp_cold_cache_run "$script_dir" "$cold_cache_helper" \
+    "$reference_path" "$result_dir/cold-cache.env" \
+    "$cold_cache_target_bytes" "$cold_cache_target_sha256" enwik9 \
+    || die "cold-cache eviction or zero-residency verification failed"
+fi
 docker start "$active_container" >/dev/null
 docker wait "$active_container" > "$result_dir/container-exit-code"
 docker inspect "$active_container" > "$result_dir/container-inspect.json"
@@ -225,6 +269,7 @@ fi
   echo "time_limit_seconds=$time_limit_seconds"
   echo "cpu_limit=$cpu_limit"
   echo "runtime_exec_policy=$runtime_exec_policy"
+  echo "cold_cache=$cold_cache"
   echo "memory_limit_bytes=$memory_limit_bytes"
   echo "execution_environment_memory_bytes=$HP_EXECUTION_RAM_BYTES"
   echo "peak_rss_kib=$(read_report "$result_dir/peak_rss_kib")"
