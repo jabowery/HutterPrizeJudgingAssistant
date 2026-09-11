@@ -22,6 +22,7 @@ cpu_limit=1
 runtime_exec_policy=strict
 expected_size=1000000000
 active_container=""
+active_log_follower=""
 active_work_dir=""
 cold_cache=false
 cold_cache_helper=""
@@ -59,6 +60,11 @@ read_report() {
   fi
 }
 cleanup() {
+  if [[ -n "$active_log_follower" ]]; then
+    kill -TERM "$active_log_follower" >/dev/null 2>&1 || true
+    wait "$active_log_follower" 2>/dev/null || true
+    active_log_follower=""
+  fi
   [[ -z "$active_container" ]] || docker rm --force "$active_container" >/dev/null 2>&1 || true
   if [[ -n "$active_work_dir" && -d "$active_work_dir" ]]; then
     docker run --rm --network none \
@@ -227,7 +233,11 @@ if [[ "$cold_cache" == true ]]; then
     || die "cold-cache eviction or zero-residency verification failed"
 fi
 docker start "$active_container" >/dev/null
+docker logs --follow "$active_container" &
+active_log_follower=$!
 docker wait "$active_container" > "$result_dir/container-exit-code"
+wait "$active_log_follower" 2>/dev/null || true
+active_log_follower=""
 docker inspect "$active_container" > "$result_dir/container-inspect.json"
 docker logs "$active_container" > "$result_dir/container.log" 2>&1 || true
 docker cp "$active_container:/work/report/." "$result_dir" >/dev/null 2>&1 || true
@@ -267,6 +277,9 @@ fi
   echo "status=$status"
   echo "geekbench5_score=${geekbench_score:-not_used_time_override}"
   echo "time_limit_seconds=$time_limit_seconds"
+  echo "time_limit_exceeded=$(read_report "$result_dir/time_limit_exceeded")"
+  echo "time_limit_exceeded_epoch=$(read_report "$result_dir/time_limit_exceeded_epoch")"
+  echo "elapsed_seconds=$(read_report "$result_dir/elapsed_seconds")"
   echo "cpu_limit=$cpu_limit"
   echo "runtime_exec_policy=$runtime_exec_policy"
   echo "cold_cache=$cold_cache"

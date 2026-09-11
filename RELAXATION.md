@@ -190,7 +190,10 @@ not grant additional resources.
 - The execution environment remains fixed at 16 GiB with no swap.
 - The 100 GB temporary-disk limit applies to all files created by the process
   tree, including unpacked executables.
-- A timeout or resource violation terminates the complete process tree.
+- Crossing the wall-time allowance records a failed result and notifies the
+  operator, but the complete process tree continues until it exits or the
+  operator terminates it. Memory and disk violations terminate the complete
+  process tree.
 - Network and privilege restrictions apply to every descendant.
 
 ## Phase closure and outside information

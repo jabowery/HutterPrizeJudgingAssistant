@@ -53,6 +53,20 @@ hp_cgroup_peak_source() {
   fi
 }
 
+hp_gnu_time_elapsed_seconds() {
+  local hp_rr_time_file="$1"
+  awk -F': ' '
+    /Elapsed \(wall clock\) time/ {
+      count = split($2, part, ":")
+      if (count == 2) {
+        printf "%.2f\n", part[1] * 60 + part[2]
+      } else if (count == 3) {
+        printf "%.2f\n", part[1] * 3600 + part[2] * 60 + part[3]
+      }
+    }
+  ' "$hp_rr_time_file"
+}
+
 hp_inventory_runtime_executables() {
   local hp_rr_run_dir="$1"
   local hp_rr_report_file="$2"

@@ -34,6 +34,7 @@ cold_cache_helper=""
 declare -a selected_entries=()
 
 active_container=""
+active_log_follower=""
 active_volume=""
 active_work_dir=""
 
@@ -85,6 +86,11 @@ die() {
 }
 
 cleanup_active() {
+  if [[ -n "$active_log_follower" ]]; then
+    kill -TERM "$active_log_follower" >/dev/null 2>&1 || true
+    wait "$active_log_follower" 2>/dev/null || true
+    active_log_follower=""
+  fi
   if [[ -n "$active_container" ]]; then
     docker rm --force "$active_container" >/dev/null 2>&1 || true
     active_container=""
@@ -649,7 +655,11 @@ for entry_dir in "${entry_dirs[@]}"; do
       || die "cold-cache eviction or zero-residency verification failed"
   fi
   docker start "$active_container" >/dev/null
+  docker logs --follow "$active_container" &
+  active_log_follower=$!
   docker wait "$active_container" > "$entry_results/container-exit-code"
+  wait "$active_log_follower" 2>/dev/null || true
+  active_log_follower=""
   if ! docker inspect "$active_container" \
       > "$entry_results/container-inspect.json" 2>/dev/null; then
     # A full-flow parent may remove this container to cancel parallel work

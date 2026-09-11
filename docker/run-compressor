@@ -48,7 +48,14 @@ write_report_value() {
 }
 
 readonly start_epoch="$(date +%s)"
+readonly start_epoch_nanoseconds="$(date +%s%N)"
+readonly deadline_epoch_nanoseconds="$((
+  start_epoch_nanoseconds + time_limit_seconds * 1000000000
+))"
 write_report_value started_epoch "$start_epoch"
+write_report_value deadline_epoch "$((deadline_epoch_nanoseconds / 1000000000))"
+write_report_value time_limit_exceeded no
+write_report_value time_limit_exceeded_epoch not_exceeded
 write_report_value runtime_exec_policy "$runtime_exec_policy"
 printf 'input\t%s\t%s\t%s\n' "$input_name" \
   "$(stat --format='%s' "$run_dir/$input_name")" \
@@ -61,7 +68,6 @@ mapfile -t executable_arguments < "$run_dir/$arguments_name"
 hp_open_monitor_descriptors "$report_dir"
 set +e
 /usr/bin/time --verbose --output="$report_dir/time.txt" \
-  timeout --signal=TERM --kill-after=60 "$time_limit_seconds" \
   chroot --userspec=65532:65532 --groups= \
     /opt/contestant-root /bin/exec-once "$runtime_exec_policy" \
     9 8 7 6 "$memory_limit_bytes" /work/run \
@@ -73,8 +79,37 @@ set -e
 peak_disk_bytes=0
 peak_apparent_bytes=0
 resource_violation=none
+time_limit_exceeded=no
+time_limit_exceeded_epoch=not_exceeded
+
+mark_time_limit_exceeded() {
+  local completion_state="$1"
+  [[ "$time_limit_exceeded" == no ]] || return 0
+  time_limit_exceeded=yes
+  time_limit_exceeded_epoch="$(date +%s)"
+  resource_violation=time
+  write_report_value time_limit_exceeded "$time_limit_exceeded"
+  write_report_value time_limit_exceeded_epoch "$time_limit_exceeded_epoch"
+  if [[ "$completion_state" == running ]]; then
+    printf 'FAIL_TIME: %s exceeded its %s-second allowance and remains running; press Ctrl-C to terminate it.\n' \
+      "$executable_name" "$time_limit_seconds" >&2
+  else
+    printf 'FAIL_TIME: %s completed after its %s-second allowance.\n' \
+      "$executable_name" "$time_limit_seconds" >&2
+  fi
+}
+
+mark_time_limit_if_due() {
+  local current_epoch_nanoseconds
+  [[ "$time_limit_exceeded" == no ]] || return 0
+  current_epoch_nanoseconds="$(date +%s%N)"
+  if (( current_epoch_nanoseconds >= deadline_epoch_nanoseconds )); then
+    mark_time_limit_exceeded running
+  fi
+}
 
 while kill -0 "$timed_pid" 2>/dev/null; do
+  mark_time_limit_if_due
   current_disk_bytes="$(du --summarize --block-size=1 /work 2>/dev/null | awk '{print $1}')"
   current_apparent_bytes="$(du --summarize --bytes /work 2>/dev/null | awk '{print $1}')"
   current_disk_bytes="${current_disk_bytes:-0}"
@@ -89,7 +124,24 @@ while kill -0 "$timed_pid" 2>/dev/null; do
     kill -KILL "$timed_pid" 2>/dev/null || true
     break
   fi
-  sleep "$disk_poll_seconds"
+  mark_time_limit_if_due
+  sleep_seconds="$disk_poll_seconds"
+  if [[ "$time_limit_exceeded" == no ]]; then
+    current_epoch_nanoseconds="$(date +%s%N)"
+    remaining_nanoseconds="$((
+      deadline_epoch_nanoseconds - current_epoch_nanoseconds
+    ))"
+    if (( remaining_nanoseconds <= 0 )); then
+      continue
+    fi
+    remaining_seconds="$((
+      (remaining_nanoseconds + 999999999) / 1000000000
+    ))"
+    if (( remaining_seconds < sleep_seconds )); then
+      sleep_seconds="$remaining_seconds"
+    fi
+  fi
+  sleep "$sleep_seconds"
 done
 
 set +e
@@ -99,6 +151,15 @@ set -e
 hp_close_monitor_descriptors
 
 readonly finish_epoch="$(date +%s)"
+gnu_time_elapsed_seconds="$(hp_gnu_time_elapsed_seconds "$report_dir/time.txt")"
+gnu_time_elapsed_seconds="${gnu_time_elapsed_seconds:-0.00}"
+elapsed_seconds="$(awk -v elapsed="$gnu_time_elapsed_seconds" \
+  'BEGIN { print int(elapsed + 0.999999) }')"
+if [[ "$time_limit_exceeded" == no ]] \
+    && awk -v elapsed="$gnu_time_elapsed_seconds" -v limit="$time_limit_seconds" \
+      'BEGIN { exit !(elapsed > limit) }'; then
+  mark_time_limit_exceeded completed
+fi
 gnu_time_peak_rss_kib="$(awk -F: '/Maximum resident set size/ {
   gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2
 }' "$report_dir/time.txt")"
@@ -119,12 +180,10 @@ peak_rss_bytes="$gnu_time_peak_rss_bytes"
 peak_rss_kib="$((peak_rss_bytes / 1024))"
 cgroup_peak_memory_bytes="$(hp_read_cgroup_peak)"
 cgroup_peak_memory_source="$(hp_cgroup_peak_source)"
-if [[ "$resource_violation" == none \
+if [[ "$resource_violation" != disk \
     && "$process_tree_memory_exceeded" == yes ]]; then
   resource_violation=memory
-elif [[ "$resource_violation" == none && "$executable_exit_code" == 124 ]]; then
-  resource_violation=time
-elif [[ "$resource_violation" == none \
+elif [[ "$resource_violation" != disk \
     && "$peak_rss_bytes" -gt "$memory_limit_bytes" ]]; then
   resource_violation=memory
 fi
@@ -137,8 +196,11 @@ final_apparent_bytes="${final_apparent_bytes:-0}"
 (( final_apparent_bytes > peak_apparent_bytes )) && peak_apparent_bytes="$final_apparent_bytes"
 
 write_report_value executable_exit_code "$executable_exit_code"
-write_report_value elapsed_seconds "$((finish_epoch - start_epoch))"
+write_report_value elapsed_seconds "$elapsed_seconds"
+write_report_value gnu_time_elapsed_seconds "$gnu_time_elapsed_seconds"
 write_report_value finished_epoch "$finish_epoch"
+write_report_value time_limit_exceeded "$time_limit_exceeded"
+write_report_value time_limit_exceeded_epoch "$time_limit_exceeded_epoch"
 write_report_value peak_disk_bytes "$peak_disk_bytes"
 write_report_value peak_apparent_bytes "$peak_apparent_bytes"
 write_report_value peak_rss_kib "$peak_rss_kib"

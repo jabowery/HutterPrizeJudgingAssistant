@@ -19,6 +19,7 @@ mkdir -p \
   "$test_dir/Entries/ParallelFail" \
   "$test_dir/Entries/HelperEscape" \
   "$test_dir/Entries/RuntimeTree" \
+  "$test_dir/Entries/SlowCompression" \
   "$test_dir/Entries/BadManifest" \
   "$test_dir/Entries/Separate"
 printf 'full flow fixture\n' > "$test_dir/enwik9"
@@ -111,6 +112,25 @@ COMPRESSOR
 chmod 0555 comp9
 EOF
   fi
+  if [[ "$compressor_mode" == slow ]]; then
+    cat > "$package_root/build.sh" <<'EOF'
+#!/bin/sh
+set -eu
+cat > comp9 <<'COMPRESSOR'
+#!/bin/sh
+set -eu
+i=0
+while [ "$i" -lt 3000000 ]; do
+  i=$((i + 1))
+done
+printf '%s\n' \
+  '#!/bin/sh' \
+  "printf 'full flow fixture\\n' > data9" \
+  > archive9
+COMPRESSOR
+chmod 0555 comp9
+EOF
+  fi
   printf '%s\n' -e enwik9 enwik9.comp > "$package_root/comp9.args"
   cat > "$entry_dir/entry.env" <<'EOF'
 ENTRY_FORMAT=self-extracting
@@ -164,6 +184,7 @@ make_entry "$test_dir/Entries/Different" submitted generated zip
 make_entry "$test_dir/Entries/ParallelFail" submitted generated tar slow fail
 make_entry "$test_dir/Entries/HelperEscape" identical identical tar success helper
 make_entry "$test_dir/Entries/RuntimeTree" identical identical tar success runtime-tree
+make_entry "$test_dir/Entries/SlowCompression" identical identical tar success slow
 make_entry "$test_dir/Entries/BadManifest" identical identical tar \
   success success invalid
 cp -a -- "$test_dir/Entries/Identical" "$test_dir/Entries/LfsPointer"
@@ -464,6 +485,45 @@ grep -q '^runtime_exec_policy=process-tree$' "$runtime_tree_final"
 runtime_tree_events="$(find "$test_dir/results-RuntimeTree" \
   -path '*/compression/*/execution-events.tsv' -type f -print -quit)"
 grep -q $'\texec-permitted\t.*\t./comp9$' "$runtime_tree_events"
+
+# Crossing the compression allowance is an immediate failed result, but the
+# compressor is allowed to finish and produce evidence unless the operator
+# terminates the run.
+set +e
+timeout --signal=TERM --kill-after=5 30 \
+  "$project_dir/judging_assistance.sh" \
+    --serial \
+    --geekbench-score 252000000 \
+    --expected-size "$fixture_size" \
+    --memory-limit-bytes 134217728 \
+    --disk-limit-bytes 104857600 \
+    --disk-poll-seconds 1 \
+    --record-size 1000 \
+    --work-root "$test_dir/work" \
+    --results "$test_dir/results-SlowCompression" \
+    "$test_dir/Entries/SlowCompression" "$test_dir/enwik9"
+slow_compression_exit=$?
+set -e
+(( slow_compression_exit != 0 \
+    && slow_compression_exit != 124 \
+    && slow_compression_exit != 137 ))
+slow_compression_final="$(find "$test_dir/results-SlowCompression" \
+  -name final.env -type f -print -quit)"
+slow_compression_env="$(find "$test_dir/results-SlowCompression" \
+  -name compression.env -type f -print -quit)"
+slow_compression_code="$(find "$test_dir/results-SlowCompression" \
+  -path '*/compression/*/executable_exit_code' -type f -print -quit)"
+slow_compression_output="$(find "$test_dir/results-SlowCompression" \
+  -path '*/compression/*/output_status' -type f -print -quit)"
+slow_compression_log="$(find "$test_dir/results-SlowCompression" \
+  -path '*/compression/*/container.log' -type f -print -quit)"
+grep -q '^failed_stage=compression$' "$slow_compression_final"
+grep -q '^status=FAIL_TIME$' "$slow_compression_env"
+grep -q '^time_limit_exceeded=yes$' "$slow_compression_env"
+grep -qx 0 "$slow_compression_code"
+grep -qx found "$slow_compression_output"
+grep -q 'FAIL_TIME: comp9 exceeded its 1-second allowance and remains running' \
+  "$slow_compression_log"
 
 # Unknown manifest keys cannot smuggle a second executable alias into the
 # trusted orchestration layer.

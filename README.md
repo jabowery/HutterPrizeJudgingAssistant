@@ -249,6 +249,13 @@ machine-readable evidence retains exact integer bytes and seconds. CPU
 capacity, wall time, disk allocation, container inspection, logs, hashes, and
 image IDs are retained under `Results/`.
 
+Crossing the wall-time allowance immediately records `FAIL_TIME` and prints a
+notice to the operator, but does not terminate the compressor or decompressor.
+The isolated process tree continues to completion so its behavior and resource
+use remain observable. The operator may press Ctrl-C to terminate it; the
+orchestrator then force-removes the active container and cleans its work area.
+Memory and disk violations remain terminating conditions.
+
 The proposed standard score is:
 
 ```text
@@ -299,8 +306,9 @@ Those synthetic entries cover tar and ZIP source packages, both official entry
 forms, parallel cancellation, memory/time/content failures, hidden build
 helpers, unknown manifest fields, strict rejection of a nested executable
 launch, and permitted descendant execution under the process-tree relaxation.
-In particular, the CPU-bound failure uses a one-second limit so that testing
-the time ceiling does not make the suite slow.
+In particular, the CPU-bound failure crosses a one-second limit, receives the
+non-terminating `FAIL_TIME` notification, and then exits on its own so the test
+can verify that the worker allowed completion.
 
 ## Example fixture status
 

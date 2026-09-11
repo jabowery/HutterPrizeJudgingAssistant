@@ -64,9 +64,12 @@ EOF
 
 cat > "$test_dir/Entries/CpuLimit/archive9" <<'EOF'
 #!/bin/sh
-while :; do
-  :
+set -eu
+i=0
+while [ "$i" -lt 3000000 ]; do
+  i=$((i + 1))
 done
+printf 'small judging fixture\n' > data9
 EOF
 
 cat > "$test_dir/Entries/Memory/archive9" <<'EOF'
@@ -300,7 +303,8 @@ aggregate_memory_flag="$(find "$test_dir/aggregate-memory-results" \
 grep -qx yes "$aggregate_memory_flag"
 
 set +e
-"$project_dir/qualify-archive.sh" \
+timeout --signal=TERM --kill-after=5 30 \
+  "$project_dir/qualify-archive.sh" \
   --skip-build \
   --executable archive9 \
   --output data9 \
@@ -318,5 +322,18 @@ set -e
 (( slow_exit != 0 ))
 slow_summary="$(find "$test_dir/slow-results" -name summary.tsv -type f -print -quit)"
 grep -q $'^CpuLimit\tFAIL_TIME\t' "$slow_summary"
+slow_time_flag="$(find "$test_dir/slow-results" \
+  -name time_limit_exceeded -type f -print -quit)"
+slow_exit_code="$(find "$test_dir/slow-results" \
+  -name executable_exit_code -type f -print -quit)"
+slow_output_status="$(find "$test_dir/slow-results" \
+  -name output_status -type f -print -quit)"
+slow_container_log="$(find "$test_dir/slow-results" \
+  -name container.log -type f -print -quit)"
+grep -qx yes "$slow_time_flag"
+grep -qx 0 "$slow_exit_code"
+grep -qx found "$slow_output_status"
+grep -q 'FAIL_TIME: archive9 exceeded its 1-second allowance and remains running' \
+  "$slow_container_log"
 
 echo "archive qualification integration tests passed"
