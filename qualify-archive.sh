@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly -a original_argv=("$@")
 source "$script_dir/lib/prize-limits.sh"
 source "$script_dir/lib/resource-units.sh"
 source "$script_dir/lib/cold-cache.sh"
@@ -19,6 +20,9 @@ payload_file=""
 payload_name=""
 geekbench_score=""
 time_limit_seconds=""
+geekbench_score_source=not_set
+geekbench_calibration_results=""
+automatic_geekbench=false
 memory_limit_bytes="$HP_PEAK_RSS_LIMIT_BYTES"
 disk_limit_bytes=100000000000
 disk_poll_seconds=10
@@ -37,6 +41,8 @@ active_container=""
 active_log_follower=""
 active_volume=""
 active_work_dir=""
+results_path_created=false
+run_results=""
 
 usage() {
   cat <<'EOF'
@@ -57,8 +63,8 @@ Options:
   --payload-file FILE        Optional read-only input payload
   --payload-name NAME        Entrant-declared basename for that payload
   --output NAME              Required entrant-declared output basename
-  --geekbench-score N        Geekbench 5 score T (required unless time overridden)
-  --time-limit-seconds N     Override the official 70000/T-hour limit
+  --geekbench-score N        Reuse a verified score instead of calibrating
+  --time-limit-seconds N     Override 70000/T and skip calibration
   --memory-limit-bytes N     Formal peak-RSS limit (default: 10 GiB)
   --disk-limit-bytes N       Sampled allocated-disk limit (default: 100 GB)
   --disk-poll-seconds N      Disk sampling interval (default: 10)
@@ -76,12 +82,54 @@ Options:
   -h, --help                 Show this help
 
 The second positional argument is equivalent to --enwik9. The reference is
-never mounted in the container that executes the submitted program.
+never mounted in the container that executes the submitted program. Execution
+runs calibrate automatically unless a verified score or diagnostic time limit
+is supplied. Preflight-only runs do not calibrate.
 EOF
 }
 
 die() {
   echo "error: $*" >&2
+  exit 2
+}
+
+restore_invoking_user_ownership() {
+  local owner
+  (( EUID == 0 )) || return 0
+  [[ "${SUDO_UID:-}" =~ ^[0-9]+$ && "${SUDO_GID:-}" =~ ^[0-9]+$ ]] \
+    || return 0
+  owner="$SUDO_UID:$SUDO_GID"
+
+  if [[ -n "$run_results" && -d "$run_results" && ! -L "$run_results" ]]; then
+    chown -R -- "$owner" "$run_results" >/dev/null 2>&1 || true
+  fi
+  if [[ "$results_path_created" == true \
+      && -d "$results_path" && ! -L "$results_path" ]]; then
+    chown -- "$owner" "$results_path" >/dev/null 2>&1 || true
+  fi
+}
+
+require_docker_daemon() {
+  local diagnostic
+  command -v docker >/dev/null \
+    || die "Docker is not installed or is not in PATH"
+  if diagnostic="$(timeout 30 docker info --format '{{.ServerVersion}}' 2>&1)"; then
+    return
+  fi
+
+  if [[ "$diagnostic" == *"permission denied"* \
+      || "$diagnostic" == *"Permission denied"* ]]; then
+    if (( EUID != 0 )); then
+      command -v sudo >/dev/null \
+        || die "Docker access requires root, but sudo is not installed or is not in PATH"
+      echo "Docker daemon access requires elevation; invoking sudo..." >&2
+      exec sudo -- "$script_dir/qualify-archive.sh" "${original_argv[@]}"
+      die "sudo could not re-execute qualify-archive.sh"
+    fi
+    printf 'error: root cannot access the Docker daemon:\n%s\n' "$diagnostic" >&2
+  else
+    printf 'error: Docker daemon is unavailable:\n%s\n' "$diagnostic" >&2
+  fi
   exit 2
 }
 
@@ -110,6 +158,7 @@ cleanup_active() {
   if [[ -n "$container_id_file" ]]; then
     rm -f -- "$container_id_file"
   fi
+  restore_invoking_user_ownership
 }
 
 trap cleanup_active EXIT
@@ -308,18 +357,27 @@ esac
 if [[ -n "$geekbench_score" ]]; then
   [[ "$geekbench_score" =~ ^[1-9][0-9]*$ ]] \
     || die "geekbench_score must be a positive integer"
+  geekbench_score_source=supplied
+fi
+
+if [[ -n "$geekbench_score" && -n "$time_limit_seconds" ]]; then
+  die "--geekbench-score and --time-limit-seconds are mutually exclusive"
 fi
 
 if [[ -n "$time_limit_seconds" ]]; then
   [[ "$time_limit_seconds" =~ ^[1-9][0-9]*$ ]] \
     || die "time_limit_seconds must be a positive integer"
+  geekbench_score_source=not_used_time_override
 elif [[ "$preflight_only" == true && -z "$geekbench_score" ]]; then
   time_limit_seconds=not_calibrated
-else
-  [[ -n "$geekbench_score" ]] \
-    || die "--geekbench-score is required unless --time-limit-seconds is supplied (use ./benchmark.sh)"
+  geekbench_score_source=not_calibrated_preflight
+elif [[ -n "$geekbench_score" ]]; then
   time_limit_seconds="$(awk -v score="$geekbench_score" \
     'BEGIN { print int((70000 * 3600) / score) }')"
+else
+  automatic_geekbench=true
+  geekbench_score_source=automatic_container_calibration
+  time_limit_seconds=pending_calibration
 fi
 
 [[ -n "$archive_name" && "$archive_name" =~ ^[A-Za-z0-9._-]+$ ]] \
@@ -354,21 +412,38 @@ if [[ "$preflight_only" != true ]]; then
     || die "reference is $actual_reference_size bytes; expected $expected_size"
 fi
 
+if [[ "$preflight_only" != true ]]; then
+  require_docker_daemon
+fi
+
+[[ -e "$results_path" ]] || results_path_created=true
 mkdir -p -- "$results_path"
 results_path="$(realpath -- "$results_path")"
 readonly run_stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-readonly run_results="$results_path/$run_stamp"
+run_results="$results_path/$run_stamp"
 mkdir -p -- "$run_results"
 
 if [[ "$preflight_only" != true ]]; then
-  command -v docker >/dev/null || die "docker is not installed"
-  timeout 30 docker info >/dev/null \
-    || die "Docker daemon is unavailable or did not answer within 00:00:30"
   if [[ "$skip_build" != true ]]; then
     docker build --tag "$image" "$script_dir"
   else
     docker image inspect "$image" >/dev/null \
       || die "Docker image does not exist: $image"
+  fi
+
+  if [[ "$automatic_geekbench" == true ]]; then
+    geekbench_calibration_results="$run_results/geekbench-calibration"
+    echo "Running automatic Geekbench 5 calibration for archive qualification..." >&2
+    if ! geekbench_score="$("$script_dir/benchmark.sh" \
+        --image "$image" \
+        --results "$geekbench_calibration_results" \
+        --skip-build)"; then
+      die "automatic Geekbench calibration failed"
+    fi
+    [[ "$geekbench_score" =~ ^[1-9][0-9]*$ ]] \
+      || die "automatic Geekbench calibration returned an invalid score"
+    time_limit_seconds="$(awk -v score="$geekbench_score" \
+      'BEGIN { print int((70000 * 3600) / score) }')"
   fi
 
   if [[ -n "$work_root" ]]; then
@@ -510,6 +585,8 @@ for entry_dir in "${entry_dirs[@]}"; do
     echo "expected_output=$expected_output"
     echo "expected_output_bytes=$expected_size"
     echo "geekbench5_score=${geekbench_score:-not_used_time_override}"
+    echo "geekbench5_score_source=$geekbench_score_source"
+    echo "geekbench5_calibration_results=$geekbench_calibration_results"
     echo "time_limit_seconds=$time_limit_seconds"
     echo "cpu_limit=$cpu_limit"
     echo "runtime_exec_policy=$runtime_exec_policy"

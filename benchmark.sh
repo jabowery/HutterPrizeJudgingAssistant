@@ -2,10 +2,14 @@
 set -Eeuo pipefail
 
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly -a original_argv=("$@")
 source "$script_dir/lib/prize-limits.sh"
 image=hutter-prize-judging:local
 results_path="$script_dir/Results"
 skip_build=false
+results_path_created=false
+run_results=""
+result_dir=""
 
 usage() {
   cat <<'EOF'
@@ -19,6 +23,46 @@ EOF
 }
 
 die() { echo "error: $*" >&2; exit 2; }
+restore_invoking_user_ownership() {
+  local owner
+  (( EUID == 0 )) || return 0
+  [[ "${SUDO_UID:-}" =~ ^[0-9]+$ && "${SUDO_GID:-}" =~ ^[0-9]+$ ]] \
+    || return 0
+  owner="$SUDO_UID:$SUDO_GID"
+
+  if [[ -n "$run_results" && -d "$run_results" && ! -L "$run_results" ]]; then
+    chown -R -- "$owner" "$run_results" >/dev/null 2>&1 || true
+  fi
+  if [[ "$results_path_created" == true \
+      && -d "$results_path" && ! -L "$results_path" ]]; then
+    chown -- "$owner" "$results_path" >/dev/null 2>&1 || true
+  fi
+}
+require_docker_daemon() {
+  local diagnostic
+  command -v docker >/dev/null \
+    || die "Docker is not installed or is not in PATH"
+  if diagnostic="$(timeout 30 docker info --format '{{.ServerVersion}}' 2>&1)"; then
+    return
+  fi
+
+  if [[ "$diagnostic" == *"permission denied"* \
+      || "$diagnostic" == *"Permission denied"* ]]; then
+    if (( EUID != 0 )); then
+      command -v sudo >/dev/null \
+        || die "Docker access requires root, but sudo is not installed or is not in PATH"
+      echo "Docker daemon access requires elevation; invoking sudo..." >&2
+      exec sudo -- "$script_dir/benchmark.sh" "${original_argv[@]}"
+      die "sudo could not re-execute benchmark.sh"
+    fi
+    printf 'error: root cannot access the Docker daemon:\n%s\n' "$diagnostic" >&2
+  else
+    printf 'error: Docker daemon is unavailable:\n%s\n' "$diagnostic" >&2
+  fi
+  exit 2
+}
+trap restore_invoking_user_ownership EXIT
+
 while (( $# > 0 )); do
   case "$1" in
     --image) (( $# >= 2 )) || die "$1 requires a value"; image="$2"; shift 2 ;;
@@ -29,17 +73,19 @@ while (( $# > 0 )); do
   esac
 done
 
-command -v docker >/dev/null || die "docker is not installed"
+require_docker_daemon
 if [[ "$skip_build" == true ]]; then
   docker image inspect "$image" >/dev/null || die "Docker image does not exist: $image"
 else
   docker build --tag "$image" "$script_dir" >&2
 fi
 
+[[ -e "$results_path" ]] || results_path_created=true
 mkdir -p -- "$results_path"
 results_path="$(realpath -- "$results_path")"
 readonly stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-readonly result_dir="$results_path/$stamp/geekbench5"
+run_results="$results_path/$stamp"
+result_dir="$run_results/geekbench5"
 mkdir -p -- "$result_dir"
 readonly log_file="$result_dir/geekbench.log"
 

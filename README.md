@@ -51,6 +51,21 @@ through `sudo` to access Docker. The customary password prompt is the only
 required interaction. Results created by the elevated process are returned to
 the invoking user's ownership.
 
+The qualification-only `benchmark.sh` and `qualify-archive.sh` wrappers use
+the same Docker-access behavior: invoke them as an ordinary user and they
+request `sudo` themselves only when access to the local Docker daemon requires
+it. Benchmarking builds only the common, entry-independent judging image; it
+does not require or inspect an entry source package.
+
+Before an execution run, `qualify-archive.sh` automatically runs that
+containerized Geekbench calibration when neither `--geekbench-score` nor
+`--time-limit-seconds` is supplied. `--geekbench-score N` reuses a separately
+verified result, while `--time-limit-seconds N` is a mutually exclusive
+diagnostic override.
+Automatic calibration evidence is retained within the qualification results
+tree. `--preflight-only` remains non-executing and records the time limit as
+uncalibrated when no score is supplied.
+
 The Docker socket must not be made world-writable; access to it is
 root-equivalent. Contestant executables do not receive that access and run as
 UID 65532 in their execution containers.
@@ -286,6 +301,7 @@ does not let an entrant declare its own score.
 ./tests/test-example-entry.sh
 ./tests/test-resource-units.sh
 ./tests/test-cold-cache.sh
+./tests/test-docker-elevation.sh
 ./tests/test-qualify-archive.sh
 ./tests/test-judging-assistance.sh
 ```
@@ -298,9 +314,11 @@ byte-for-byte unchanged. The Example test checks that the successful fixture
 remains purpose-built and uses portable baseline x86-64 compilation. The
 resource-unit test enforces byte-significant GiB for RAM, byte-significant
 decimal GB for disk, and `HH:MM:SS` durations in human-readable output. The
-The cold-cache test builds and exercises the trusted `mincore(2)` verifier and
+cold-cache test builds and exercises the trusted `mincore(2)` verifier and
 checks the formal-run CLI invariants without evicting the development host's
-cache. The integration tests generate their own
+cache. The Docker-elevation test verifies both automatic qualification
+calibration and re-execution through `sudo` before creating results when local
+Docker access requires it. The integration tests generate their own
 small entries and alternate `entry.env` manifests under a temporary directory.
 Those synthetic entries cover tar and ZIP source packages, both official entry
 forms, parallel cancellation, memory/time/content failures, hidden build
