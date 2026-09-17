@@ -217,6 +217,18 @@ runtime executables. Failure only under `strict` is not a failure under the
 selected relaxation.
 
 Source tar/ZIP extraction, `install.sh`, and `build.sh` are separate containers.
+`install.sh` supplies both build dependencies and any shared libraries needed
+when the submitted or rebuilt executables run. The orchestrator derives two
+images from that one installation: an offline build image retaining the
+installed tools, and a runtime image that starts again from the trusted common
+image and adds only loader-visible files from the standard system library
+trees to the entrant's chroot. The collection itself occurs in a fresh trusted
+stage, not through utilities that `install.sh` could have replaced. Thus an
+installation cannot replace the trusted worker scripts or execution monitor.
+The monitor is statically linked so entrant-installed C libraries cannot alter
+it. The same runtime image is used for submitted decompression, rebuilt
+compression, and any required generated-archive decompression.
+
 The source build returns only the executable role(s) declared in `entry.env`.
 Other build outputs never enter a scored runtime.
 
@@ -238,11 +250,12 @@ executable image when constructing an archive. The pinned UPX archive has SHA-25
 ## Privilege and network phases
 
 The common judging image may use the network while it is built. For entrant
-code, only `install.sh` runs as root with network access, while constructing a
-dependency image. It receives no source tree. All later entrant stages are
-offline. `build.sh` runs as UID/GID 65532 in its own container; executable
-validation uses trusted orchestration tools as UID/GID 65532; every
-compressor/decompressor runs offline as UID/GID 65532 under the formal limits.
+code, only `install.sh` runs as root with network access, while constructing
+the build and sanitized runtime dependency images described above. It receives
+no source tree. All later entrant stages are offline. `build.sh` runs as
+UID/GID 65532 in its own container; executable validation uses trusted
+orchestration tools as UID/GID 65532; every compressor/decompressor runs
+offline as UID/GID 65532 under the formal limits.
 
 Entrant containers share the Docker daemon host's Linux kernel. Namespace and
 capability restrictions therefore do not replace the hardened-kernel condition
@@ -302,6 +315,7 @@ does not let an entrant declare its own score.
 ./tests/test-resource-units.sh
 ./tests/test-cold-cache.sh
 ./tests/test-docker-elevation.sh
+./tests/test-dependency-runtime.sh
 ./tests/test-qualify-archive.sh
 ./tests/test-judging-assistance.sh
 ```
@@ -316,10 +330,13 @@ resource-unit test enforces byte-significant GiB for RAM, byte-significant
 decimal GB for disk, and `HH:MM:SS` durations in human-readable output. The
 cold-cache test builds and exercises the trusted `mincore(2)` verifier and
 checks the formal-run CLI invariants without evicting the development host's
-cache. The Docker-elevation test verifies both automatic qualification
-calibration and re-execution through `sudo` before creating results when local
-Docker access requires it. The integration tests generate their own
-small entries and alternate `entry.env` manifests under a temporary directory.
+cache. The Docker-elevation test verifies automatic qualification calibration,
+re-execution through `sudo` when local Docker access requires it, and ownership
+restoration. The dependency-runtime test verifies that an
+`install.sh`-provided shared library is available to an entrant executable
+while the trusted worker remains unchanged and its execution monitor remains
+statically linked. The integration tests generate their own small entries and
+alternate `entry.env` manifests under a temporary directory.
 Those synthetic entries cover tar and ZIP source packages, both official entry
 forms, parallel cancellation, memory/time/content failures, hidden build
 helpers, unknown manifest fields, strict rejection of a nested executable

@@ -407,6 +407,8 @@ grep -Eq '^enforcing_lsm=(apparmor|selinux)$' "$identical_security"
 grep -q '^technical_verdict=PASS$' "$identical_final"
 grep -q '^job_slots=2$' "$identical_final"
 grep -q '^execution_mode=parallel$' "$identical_final"
+grep -q '^dependency_build_image=' "$identical_final"
+grep -q '^dependency_runtime_image=' "$identical_final"
 grep -q '^archives_identical=yes$' "$identical_final"
 grep -q '^second_decompression=skipped_identical$' "$identical_final"
 [[ ! -e "$(dirname -- "$identical_final")/qualification-container-id" ]]
@@ -421,6 +423,13 @@ grep -q '"Memory": 17179869184' "$identical_compression_inspect"
 grep -q '"MemorySwap": 17179869184' "$identical_compression_inspect"
 grep -q '^command_line_bytes=22$' "$identical_compression"
 grep -q '^command_line_bytes=22$' "$identical_final"
+identical_qualification_preflight="$(find "$test_dir/results-Identical" \
+  -path '*/submitted-decompression/*/submitted/preflight.env' \
+  -type f -print -quit)"
+identical_runtime_image="$(awk -F= '$1 == "dependency_runtime_image" {print $2}' \
+  "$identical_final")"
+grep -qx "judging_image=$identical_runtime_image" \
+  "$identical_qualification_preflight"
 grep -q '^Geekbench 5 T: 8400000; limit per executable: 00:00:30$' \
   "$identical_report"
 grep -q '^RAM peak-RSS limit: 0.125 GiB$' "$identical_report"

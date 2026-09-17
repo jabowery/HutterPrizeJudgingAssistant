@@ -6,7 +6,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY docker/exec-once.c /src/exec-once.c
 COPY docker/mincore-residency.c /src/mincore-residency.c
-RUN gcc -O2 -Wall -Wextra -Werror /src/exec-once.c -o /exec-once \
+RUN gcc -static -O2 -Wall -Wextra -Werror /src/exec-once.c -o /exec-once \
     && gcc -O2 -Wall -Wextra -Werror \
          /src/mincore-residency.c -o /mincore-residency
 

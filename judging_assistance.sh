@@ -4,6 +4,7 @@ set -Eeuo pipefail
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly -a original_argv=("$@")
 source "$script_dir/lib/entry-env.sh"
+source "$script_dir/lib/dependency-image.sh"
 source "$script_dir/lib/prize-limits.sh"
 source "$script_dir/lib/resource-units.sh"
 source "$script_dir/lib/cold-cache.sh"
@@ -396,6 +397,13 @@ fi
 time_limit_seconds="$(awk -v score="$geekbench_score" \
   'BEGIN { print int((70000 * 3600) / score) }')"
 
+if ! dependency_images="$(hp_dependency_image_build \
+    "$script_dir" "$image" "$entry_dir" "$run_results/dependencies")"; then
+  stage_fail dependencies "install.sh dependency image failed"
+fi
+IFS=$'\t' read -r dependency_build_image dependency_runtime_image \
+  <<< "$dependency_images"
+
 common_limits=(
   --geekbench-score "$geekbench_score"
   --memory-limit-bytes "$memory_limit_bytes"
@@ -404,7 +412,7 @@ common_limits=(
   --cpus "$cpu_limit"
   --runtime-exec-policy "$runtime_exec_policy"
   --work-root "$work_root"
-  --image "$image"
+  --image "$dependency_runtime_image"
   --expected-size "$expected_size"
 )
 if [[ "$cold_cache" == true ]]; then
@@ -470,6 +478,7 @@ if [[ "$HP_ENTRY_FORMAT" == separate-decompressor ]]; then
 fi
 if ! "$script_dir/build-compressor.sh" \
     --skip-base-build --image "$image" \
+    --dependency-build-image "$dependency_build_image" \
     --work-root "$work_root" --results "$run_results/build" \
     --output "$compressor_path" "${build_options[@]}" "$entry_dir"; then
   stage_fail compressor_build "standard offline build failed"
@@ -500,7 +509,7 @@ if [[ "$cold_cache" == true ]]; then
   compression_cold_options=(--cold-cache --cold-cache-helper "$cold_cache_helper")
 fi
 if ! "$script_dir/compress-entry.sh" \
-    --image "$image" --work-root "$work_root" \
+    --image "$dependency_runtime_image" --work-root "$work_root" \
     --results "$run_results/compression" \
     --output "$generated_archive" \
     --geekbench-score "$geekbench_score" \
@@ -618,6 +627,12 @@ fi
   echo "disk_limit_bytes=$disk_limit_bytes"
   echo "job_slots=$job_slots"
   echo "execution_mode=$execution_mode"
+  echo "common_image=$image"
+  echo "common_image_id=$(docker image inspect "$image" --format '{{.Id}}')"
+  echo "dependency_build_image=$dependency_build_image"
+  echo "dependency_build_image_id=$(docker image inspect "$dependency_build_image" --format '{{.Id}}')"
+  echo "dependency_runtime_image=$dependency_runtime_image"
+  echo "dependency_runtime_image_id=$(docker image inspect "$dependency_runtime_image" --format '{{.Id}}')"
   echo "runtime_exec_policy=$runtime_exec_policy"
   echo "cold_cache=$cold_cache"
   echo "entry_format=$HP_ENTRY_FORMAT"

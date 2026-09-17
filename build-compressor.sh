@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$script_dir/lib/entry-env.sh"
+source "$script_dir/lib/dependency-image.sh"
 source "$script_dir/lib/prize-limits.sh"
 source "$script_dir/lib/resource-units.sh"
 base_image=hutter-prize-judging:local
@@ -12,6 +13,7 @@ decompressor_output_path=""
 results_path="$script_dir/Results"
 work_root="${TMPDIR:-/tmp}"
 skip_base_build=false
+dependency_build_image_override=""
 active_container=""
 active_work_dir=""
 
@@ -31,6 +33,8 @@ Options:
   --work-root DIR     Filesystem for temporary build data (default: $TMPDIR)
   --image NAME        Base judging image (default: hutter-prize-judging:local)
   --skip-base-build   Reuse the base judging image
+  --dependency-build-image NAME
+                      Reuse the install.sh build image prepared by the orchestrator
 EOF
 }
 
@@ -59,6 +63,11 @@ while (( $# > 0 )); do
     --work-root) (( $# >= 2 )) || die "$1 requires a value"; work_root="$2"; shift 2 ;;
     --image) (( $# >= 2 )) || die "$1 requires a value"; base_image="$2"; shift 2 ;;
     --skip-base-build) skip_base_build=true; shift ;;
+    --dependency-build-image)
+      (( $# >= 2 )) || die "$1 requires a value"
+      dependency_build_image_override="$2"
+      shift 2
+      ;;
     -h|--help) usage; exit 0 ;;
     -*) die "unknown option: $1" ;;
     *) [[ -z "$entry_dir" ]] || die "only one ENTRY_DIR may be supplied"; entry_dir="$1"; shift ;;
@@ -87,8 +96,6 @@ fi
 
 entry_name="$(basename -- "$entry_dir")"
 install_hash="$(sha256sum "$entry_dir/install.sh" | awk '{print $1}')"
-safe_name="$(printf '%s' "$entry_name" | tr -c 'a-zA-Z0-9_.-' '-' | tr '[:upper:]' '[:lower:]')"
-dependency_image="hutter-prize-entry-${safe_name}:${install_hash:0:16}"
 
 mkdir -p -- "$results_path"
 results_path="$(realpath -- "$results_path")"
@@ -96,32 +103,25 @@ readonly stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 readonly result_dir="$results_path/$stamp/build-$entry_name"
 mkdir -p -- "$result_dir"
 
-echo "[$entry_name] building dependency image; this is the only entry root/network phase" >&2
-readonly max_install_attempts=3
-install_attempts=0
-install_exit=1
-: > "$result_dir/install.log"
-while (( install_attempts < max_install_attempts )); do
-  ((install_attempts += 1))
-  echo "[$entry_name] dependency image attempt $install_attempts/$max_install_attempts" \
-    | tee -a "$result_dir/install.log" >&2
-  set +e
-  docker build \
-    --file "$script_dir/docker/EntryDependencies.Dockerfile" \
-    --build-arg "BASE_IMAGE=$base_image" \
-    --tag "$dependency_image" \
-    "$entry_dir" 2>&1 | tee -a "$result_dir/install.log" >&2
-  install_exit="${PIPESTATUS[0]}"
-  set -e
-  (( install_exit != 0 )) || break
-  if (( install_attempts < max_install_attempts )); then
-    retry_delay="$((install_attempts * 20))"
-    echo "[$entry_name] dependency image failed with status $install_exit; retrying in $(hp_format_hms "$retry_delay")" \
-      | tee -a "$result_dir/install.log" >&2
-    sleep "$retry_delay"
-  fi
-done
-(( install_exit == 0 )) || die "install.sh dependency image failed with status $install_exit"
+if [[ -n "$dependency_build_image_override" ]]; then
+  dependency_build_image="$dependency_build_image_override"
+  docker image inspect "$dependency_build_image" >/dev/null \
+    || die "dependency build image does not exist: $dependency_build_image"
+  dependency_image_source=orchestrator
+  install_attempts=not_repeated
+  install_max_attempts=not_repeated
+else
+  dependency_images="$(hp_dependency_image_build \
+    "$script_dir" "$base_image" "$entry_dir" "$result_dir")" \
+    || die "install.sh dependency image failed"
+  IFS=$'\t' read -r dependency_build_image dependency_runtime_image \
+    <<< "$dependency_images"
+  dependency_image_source=build_compressor
+  install_attempts="$(awk -F= '$1 == "install_attempts" {print $2}' \
+    "$result_dir/dependency-image.env")"
+  install_max_attempts="$(awk -F= '$1 == "install_max_attempts" {print $2}' \
+    "$result_dir/dependency-image.env")"
+fi
 
 active_work_dir="$(mktemp -d -- "$work_root/hutter-build-$stamp.XXXXXX")"
 chmod 1777 "$active_work_dir"
@@ -140,7 +140,7 @@ active_container="$(docker create \
   --workdir /work \
   --mount "type=bind,source=$entry_dir,target=/entry,readonly" \
   --mount "type=bind,source=$active_work_dir,target=/work" \
-  "$dependency_image" /entry/build.sh)"
+  "$dependency_build_image" /entry/build.sh)"
 
 echo "[$entry_name] running build.sh offline as UID 65532" >&2
 docker start --attach "$active_container" \
@@ -180,10 +180,15 @@ fi
   echo "entry=$entry_name"
   echo "install_sha256=$install_hash"
   echo "install_attempts=$install_attempts"
-  echo "install_max_attempts=$max_install_attempts"
+  echo "install_max_attempts=$install_max_attempts"
   echo "build_sha256=$(sha256sum "$entry_dir/build.sh" | awk '{print $1}')"
-  echo "dependency_image=$dependency_image"
-  echo "dependency_image_id=$(docker image inspect "$dependency_image" --format '{{.Id}}')"
+  echo "dependency_build_image=$dependency_build_image"
+  echo "dependency_build_image_id=$(docker image inspect "$dependency_build_image" --format '{{.Id}}')"
+  if [[ -n "${dependency_runtime_image:-}" ]]; then
+    echo "dependency_runtime_image=$dependency_runtime_image"
+    echo "dependency_runtime_image_id=$(docker image inspect "$dependency_runtime_image" --format '{{.Id}}')"
+  fi
+  echo "dependency_image_source=$dependency_image_source"
   echo "build_network=none"
   echo "build_uid=65532"
   echo "compressor_name=$HP_COMPRESSOR"
