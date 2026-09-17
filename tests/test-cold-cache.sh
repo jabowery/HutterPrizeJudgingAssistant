@@ -66,6 +66,32 @@ set -e
 grep -q 'requires enwik9 input on a Linux filesystem' \
   "$test_dir/wsl-storage.stderr"
 
+# The executables that source this library intentionally define a global,
+# readonly script_dir. Library functions must not try to shadow it with a
+# local variable, which Bash rejects before performing the cache operation.
+set +e
+(
+  readonly script_dir="$project_dir"
+  source "$project_dir/lib/cold-cache.sh"
+  unset HP_COLD_CACHE_LOCK_HELD HP_COLD_CACHE_LOCK_FD
+  sudo() { return 2; }
+  hp_cold_cache_acquire_lock /definitely-missing
+) >"$test_dir/readonly-lock.stdout" 2>"$test_dir/readonly-lock.stderr"
+readonly_lock_exit=$?
+(
+  readonly script_dir="$project_dir"
+  source "$project_dir/lib/cold-cache.sh"
+  unset HP_COLD_CACHE_LOCK_HELD HP_COLD_CACHE_LOCK_FD
+  hp_cold_cache_run "$project_dir" /missing-helper /missing-target \
+    "$test_dir/missing-evidence" 0 missing test
+) >"$test_dir/readonly-run.stdout" 2>"$test_dir/readonly-run.stderr"
+readonly_run_exit=$?
+set -e
+(( readonly_lock_exit != 0 ))
+(( readonly_run_exit == 2 ))
+! grep -q 'readonly variable' "$test_dir/readonly-lock.stderr"
+! grep -q 'readonly variable' "$test_dir/readonly-run.stderr"
+
 assert_create_evict_start_order() {
   local path="$1"
   local create_line evict_line start_line

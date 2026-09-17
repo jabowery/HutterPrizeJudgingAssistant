@@ -18,7 +18,7 @@ hp_cold_cache_extract_mincore_helper() {
 }
 
 hp_cold_cache_acquire_lock() {
-  local script_dir="$1"
+  local orchestrator_dir="$1"
   local lock_path=/run/lock/hutter-prize-cold-cache.lock
   command -v flock >/dev/null || {
     echo "error: --cold-cache requires flock from util-linux" >&2
@@ -33,14 +33,14 @@ hp_cold_cache_acquire_lock() {
   unset HP_COLD_CACHE_LOCK_HELD HP_COLD_CACHE_LOCK_FD
 
   if (( EUID == 0 )); then
-    "$script_dir/cold-cache-host-helper.sh" --prepare-lock || return
+    "$orchestrator_dir/cold-cache-host-helper.sh" --prepare-lock || return
   else
     command -v sudo >/dev/null || {
       echo "error: --cold-cache requires sudo for host cache control" >&2
       return 2
     }
     sudo --validate || return
-    sudo --non-interactive -- "$script_dir/cold-cache-host-helper.sh" \
+    sudo --non-interactive -- "$orchestrator_dir/cold-cache-host-helper.sh" \
       --prepare-lock || return
   fi
   [[ -f "$lock_path" && ! -L "$lock_path" \
@@ -107,7 +107,7 @@ hp_cold_cache_validate_work_root() {
 }
 
 hp_cold_cache_run() {
-  local script_dir="$1"
+  local orchestrator_dir="$1"
   local mincore_helper="$2"
   local target="$3"
   local evidence_file="$4"
@@ -143,9 +143,9 @@ hp_cold_cache_run() {
     echo "target_sha256=$target_sha256"
     echo "mincore_helper_sha256=$(sha256sum -- "$mincore_helper" | awk '{print $1}')"
     if (( EUID == 0 )); then
-      "$script_dir/cold-cache-host-helper.sh" --target "$target"
+      "$orchestrator_dir/cold-cache-host-helper.sh" --target "$target"
     else
-      sudo --non-interactive -- "$script_dir/cold-cache-host-helper.sh" \
+      sudo --non-interactive -- "$orchestrator_dir/cold-cache-host-helper.sh" \
         --target "$target"
     fi
     "$mincore_helper" --require-zero "$target"
