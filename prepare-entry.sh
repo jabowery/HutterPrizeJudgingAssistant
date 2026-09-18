@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$script_dir/lib/entry-env.sh"
-image=hutter-prize-judging:local
+image=""
 entry_dir=""
 output_dir=""
 results_path="$script_dir/Results"
@@ -36,7 +36,7 @@ is printed on stdout. No filename is inferred by the orchestrator.
 Options:
   --output DIR       Required new directory for prepared source
   --results DIR      Store preparation evidence under DIR (default: ./Results)
-  --image NAME       Common judging image (default: hutter-prize-judging:local)
+  --image NAME       Override the catalog-derived local image tag
   --skip-build       Reuse the common judging image
 EOF
 }
@@ -62,6 +62,8 @@ done
 entry_dir="$(realpath -- "$entry_dir")"
 hp_manifest_load "$entry_dir/entry.env" || exit 2
 hp_manifest_require_linux || exit 2
+image="${image:-$(hp_qualification_os_image_tag "$HP_QUALIFICATION_OS")}" \
+  || die "could not derive qualification image tag"
 readonly package="$entry_dir/$HP_SOURCE_PACKAGE"
 [[ -f "$package" && ! -L "$package" ]] \
   || die "SOURCE_PACKAGE is missing or is not a regular file: $HP_SOURCE_PACKAGE"
@@ -75,8 +77,10 @@ fi
 command -v docker >/dev/null || die "docker is not installed"
 if [[ "$skip_build" == true ]]; then
   docker image inspect "$image" >/dev/null || die "missing image: $image"
+  hp_qualification_os_verify_image "$image" "$HP_QUALIFICATION_OS" \
+    || die "Docker image does not match entry QUALIFICATION_OS"
 else
-  docker build --tag "$image" "$script_dir" >&2
+  hp_qualification_os_build "$HP_QUALIFICATION_OS" "$image" "$script_dir" >&2
 fi
 
 mkdir -p -- "$(dirname -- "$output_dir")"
@@ -144,6 +148,8 @@ chmod 0444 "$result_dir/scripts/"*
   echo "package_sha256=$(sha256sum "$package" | awk '{print $1}')"
   echo "entry_format=$HP_ENTRY_FORMAT"
   echo "execution_platform=$HP_EXECUTION_PLATFORM"
+  echo "qualification_os=$HP_QUALIFICATION_OS"
+  echo "qualification_os_image=$(hp_qualification_os_image "$HP_QUALIFICATION_OS")"
   echo "archive_file=$HP_ARCHIVE"
   echo "archive_bytes=$(stat --format='%s' "$entry_dir/$HP_ARCHIVE")"
   echo "archive_sha256=$(sha256sum "$entry_dir/$HP_ARCHIVE" | awk '{print $1}')"

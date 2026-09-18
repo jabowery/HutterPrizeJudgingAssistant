@@ -6,8 +6,10 @@ readonly -a original_argv=("$@")
 source "$script_dir/lib/prize-limits.sh"
 source "$script_dir/lib/resource-units.sh"
 source "$script_dir/lib/cold-cache.sh"
+source "$script_dir/lib/qualification-os.sh"
 
-image="hutter-prize-judging:local"
+image=""
+qualification_os="$HP_DEFAULT_QUALIFICATION_OS"
 entries_path=""
 reference_path=""
 results_path="$script_dir/Results"
@@ -73,7 +75,8 @@ Options:
   --cold-cache               Evict and verify the exact staged input before start
   --record-size N            Previous record L (default: 110793128)
   --expected-size N          Reference/output size (default: 1000000000)
-  --image NAME               Docker image tag
+  --image NAME               Override the catalog-derived local image tag
+  --qualification-os NAME    Trusted catalog alias (default: ubuntu-22.04)
   --skip-build               Use an existing image
   --preflight-only           Inventory and score without executing submissions
   --keep-work                Keep per-entry Docker volumes for inspection
@@ -274,6 +277,11 @@ while (( $# > 0 )); do
       image="$2"
       shift 2
       ;;
+    --qualification-os)
+      require_value "$@"
+      qualification_os="$2"
+      shift 2
+      ;;
     --skip-build)
       skip_build=true
       shift
@@ -353,6 +361,10 @@ case "$runtime_exec_policy" in
   strict|process-tree) ;;
   *) die "runtime-exec-policy must be strict or process-tree" ;;
 esac
+qualification_os_image="$(hp_qualification_os_image "$qualification_os")" \
+  || die "invalid qualification OS"
+image="${image:-$(hp_qualification_os_image_tag "$qualification_os")}" \
+  || die "could not derive qualification image tag"
 
 if [[ -n "$geekbench_score" ]]; then
   [[ "$geekbench_score" =~ ^[1-9][0-9]*$ ]] \
@@ -425,10 +437,12 @@ mkdir -p -- "$run_results"
 
 if [[ "$preflight_only" != true ]]; then
   if [[ "$skip_build" != true ]]; then
-    docker build --tag "$image" "$script_dir"
+    hp_qualification_os_build "$qualification_os" "$image" "$script_dir"
   else
     docker image inspect "$image" >/dev/null \
       || die "Docker image does not exist: $image"
+    hp_qualification_os_verify_image "$image" "$qualification_os" \
+      || die "Docker image does not match --qualification-os"
   fi
 
   if [[ "$automatic_geekbench" == true ]]; then
@@ -436,6 +450,7 @@ if [[ "$preflight_only" != true ]]; then
     echo "Running automatic Geekbench 5 calibration for archive qualification..." >&2
     if ! geekbench_score="$("$script_dir/benchmark.sh" \
         --image "$image" \
+        --qualification-os "$qualification_os" \
         --results "$geekbench_calibration_results" \
         --skip-build)"; then
       die "automatic Geekbench calibration failed"
@@ -597,6 +612,8 @@ for entry_dir in "${entry_dirs[@]}"; do
     echo "work_root=${work_root:-docker-managed-volume}"
     echo "judging_image=$image"
     echo "judging_image_id=$image_id"
+    echo "qualification_os=$qualification_os"
+    echo "qualification_os_image=$qualification_os_image"
     echo "docker_server_version=$docker_version"
   } > "$entry_results/preflight.env"
 
@@ -837,6 +854,8 @@ done
   fi
   echo "Memory peak-RSS limit: $(hp_format_gib "$memory_limit_bytes")"
   echo "Execution-environment RAM: $(hp_format_gib "$HP_EXECUTION_RAM_BYTES")"
+  echo "Qualification OS: $qualification_os"
+  echo "Qualification image: $qualification_os_image"
   echo "Cold cache: $cold_cache"
   echo "Runtime executable policy: $runtime_exec_policy"
   echo "Disk limit: $(hp_format_gb "$disk_limit_bytes") allocated (sampled every $(hp_format_hms "$disk_poll_seconds"))"

@@ -4,7 +4,9 @@ set -Eeuo pipefail
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly -a original_argv=("$@")
 source "$script_dir/lib/prize-limits.sh"
-image=hutter-prize-judging:local
+source "$script_dir/lib/qualification-os.sh"
+image=""
+qualification_os="$HP_DEFAULT_QUALIFICATION_OS"
 results_path="$script_dir/Results"
 skip_build=false
 results_path_created=false
@@ -13,7 +15,7 @@ result_dir=""
 
 usage() {
   cat <<'EOF'
-Usage: ./benchmark.sh [--image NAME] [--results DIR] [--skip-build]
+Usage: ./benchmark.sh [--image NAME] [--qualification-os NAME] [--results DIR] [--skip-build]
 
 Run the supplied Geekbench 5.5.1 Linux CPU benchmark inside the same Docker
 runtime used for judging. The Tryout edition requires temporary Internet access
@@ -66,6 +68,7 @@ trap restore_invoking_user_ownership EXIT
 while (( $# > 0 )); do
   case "$1" in
     --image) (( $# >= 2 )) || die "$1 requires a value"; image="$2"; shift 2 ;;
+    --qualification-os) (( $# >= 2 )) || die "$1 requires a value"; qualification_os="$2"; shift 2 ;;
     --results) (( $# >= 2 )) || die "$1 requires a value"; results_path="$2"; shift 2 ;;
     --skip-build) skip_build=true; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -74,10 +77,16 @@ while (( $# > 0 )); do
 done
 
 require_docker_daemon
+qualification_os_image="$(hp_qualification_os_image "$qualification_os")" \
+  || die "invalid qualification OS"
+image="${image:-$(hp_qualification_os_image_tag "$qualification_os")}" \
+  || die "could not derive qualification image tag"
 if [[ "$skip_build" == true ]]; then
   docker image inspect "$image" >/dev/null || die "Docker image does not exist: $image"
+  hp_qualification_os_verify_image "$image" "$qualification_os" \
+    || die "Docker image does not match --qualification-os"
 else
-  docker build --tag "$image" "$script_dir" >&2
+  hp_qualification_os_build "$qualification_os" "$image" "$script_dir" >&2
 fi
 
 [[ -e "$results_path" ]] || results_path_created=true
@@ -183,6 +192,8 @@ image_id="$(docker image inspect "$image" --format '{{.Id}}')"
   echo "network_access=trusted_calibration_only"
   echo "judging_image=$image"
   echo "judging_image_id=$image_id"
+  echo "qualification_os=$qualification_os"
+  echo "qualification_os_image=$qualification_os_image"
   echo "docker_server_version=$(docker version --format '{{.Server.Version}}')"
   echo "calibrated_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } > "$result_dir/calibration.env"

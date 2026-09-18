@@ -13,6 +13,7 @@ mapfile -t entry_files < <(
 [[ "${entry_files[*]}" == "archive9 entry.env example-source.tar.gz" ]]
 
 grep -qx 'SOURCE_PACKAGE=example-source.tar.gz' "$entry_dir/entry.env"
+grep -qx 'QUALIFICATION_OS=ubuntu-22.04' "$entry_dir/entry.env"
 grep -qx 'COMPRESSOR=comp9' "$entry_dir/entry.env"
 grep -qx 'COMPRESSOR_FORMAT=executable' "$entry_dir/entry.env"
 grep -qx 'COMPRESSOR_ARGUMENTS=comp9.args' "$entry_dir/entry.env"

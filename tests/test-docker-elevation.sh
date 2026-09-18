@@ -85,7 +85,17 @@ case "$1" in
     ;;
   image)
     if [ "$2" = inspect ]; then
-      printf '%s\n' 'sha256:automatic-calibration-test'
+      case " $* " in
+        *org.hutterprize.qualification-os-image*)
+          printf '%s\n' 'ubuntu:22.04@sha256:58b87898e82351c6cf9cf5b9f3c20257bb9e2dcf33af051e12ce532d7f94e3fe'
+          ;;
+        *org.hutterprize.qualification-os*)
+          printf '%s\n' 'ubuntu-22.04'
+          ;;
+        *)
+          printf '%s\n' 'sha256:automatic-calibration-test'
+          ;;
+      esac
     else
       exit 92
     fi

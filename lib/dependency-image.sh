@@ -2,16 +2,24 @@
 
 hp_dependency_image_names() {
   local hp_dep_entry_dir="$1"
+  local hp_dep_base_image="$2"
   local hp_dep_entry_name hp_dep_install_hash hp_dep_safe_name
+  local hp_dep_qualification_os hp_dep_safe_os
   hp_dep_entry_name="$(basename -- "$hp_dep_entry_dir")"
   hp_dep_install_hash="$(sha256sum -- "$hp_dep_entry_dir/install.sh" | awk '{print $1}')" \
     || return 1
   hp_dep_safe_name="$(printf '%s' "$hp_dep_entry_name" \
     | tr -c 'a-zA-Z0-9_.-' '-' | tr '[:upper:]' '[:lower:]')"
-  printf 'hutter-prize-entry-%s:%s-build\t' \
-    "$hp_dep_safe_name" "${hp_dep_install_hash:0:16}"
-  printf 'hutter-prize-entry-%s:%s-runtime\n' \
-    "$hp_dep_safe_name" "${hp_dep_install_hash:0:16}"
+  hp_dep_qualification_os="$(docker image inspect "$hp_dep_base_image" \
+    --format '{{index .Config.Labels "org.hutterprize.qualification-os"}}')" \
+    || return 1
+  [[ -n "$hp_dep_qualification_os" ]] || return 1
+  hp_dep_safe_os="$(printf '%s' "$hp_dep_qualification_os" \
+    | tr -c 'a-zA-Z0-9_.-' '-' | tr '[:upper:]' '[:lower:]')"
+  printf 'hutter-prize-entry-%s:%s-%s-build\t' \
+    "$hp_dep_safe_name" "$hp_dep_safe_os" "${hp_dep_install_hash:0:16}"
+  printf 'hutter-prize-entry-%s:%s-%s-runtime\n' \
+    "$hp_dep_safe_name" "$hp_dep_safe_os" "${hp_dep_install_hash:0:16}"
 }
 
 hp_dependency_image_build() {
@@ -24,13 +32,23 @@ hp_dependency_image_build() {
   local hp_dep_image_names
   local hp_dep_entry_name hp_dep_install_hash hp_dep_install_attempts
   local hp_dep_install_exit hp_dep_retry_delay
+  local hp_dep_qualification_os hp_dep_qualification_os_image
   local hp_dep_max_install_attempts=3
 
   hp_dep_entry_name="$(basename -- "$hp_dep_entry_dir")"
   hp_dep_install_hash="$(sha256sum -- "$hp_dep_entry_dir/install.sh" | awk '{print $1}')" \
     || return 1
+  hp_dep_qualification_os="$(docker image inspect "$hp_dep_base_image" \
+    --format '{{index .Config.Labels "org.hutterprize.qualification-os"}}')" \
+    || return 1
+  hp_dep_qualification_os_image="$(docker image inspect "$hp_dep_base_image" \
+    --format '{{index .Config.Labels "org.hutterprize.qualification-os-image"}}')" \
+    || return 1
+  [[ -n "$hp_dep_qualification_os" && -n "$hp_dep_qualification_os_image" ]] \
+    || return 1
   if [[ -z "$hp_dep_build_image" || -z "$hp_dep_runtime_image" ]]; then
-    hp_dep_image_names="$(hp_dependency_image_names "$hp_dep_entry_dir")" \
+    hp_dep_image_names="$(hp_dependency_image_names \
+      "$hp_dep_entry_dir" "$hp_dep_base_image")" \
       || return 1
     IFS=$'\t' read -r hp_dep_build_image hp_dep_runtime_image \
       <<< "$hp_dep_image_names"
@@ -84,6 +102,8 @@ hp_dependency_image_build() {
     echo "install_max_attempts=$hp_dep_max_install_attempts"
     echo "base_image=$hp_dep_base_image"
     echo "base_image_id=$(docker image inspect "$hp_dep_base_image" --format '{{.Id}}')"
+    echo "qualification_os=$hp_dep_qualification_os"
+    echo "qualification_os_image=$hp_dep_qualification_os_image"
     echo "dependency_build_image=$hp_dep_build_image"
     echo "dependency_build_image_id=$(docker image inspect "$hp_dep_build_image" --format '{{.Id}}')"
     echo "dependency_runtime_image=$hp_dep_runtime_image"

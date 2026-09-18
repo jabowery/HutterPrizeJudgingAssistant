@@ -3,6 +3,10 @@
 # Strict parser for the contestant-provided submission manifest.  This file is
 # sourced by trusted host scripts; entry.env itself is never sourced.
 
+if ! declare -F hp_qualification_os_image >/dev/null; then
+  source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/qualification-os.sh"
+fi
+
 hp_manifest_die() {
   printf 'invalid entry.env: %s\n' "$*" >&2
   return 2
@@ -46,6 +50,7 @@ hp_manifest_load() {
 
   HP_ENTRY_FORMAT=
   HP_EXECUTION_PLATFORM=
+  HP_QUALIFICATION_OS=
   HP_SOURCE_PACKAGE=
   HP_COMPRESSOR=
   HP_COMPRESSOR_FORMAT=
@@ -73,6 +78,7 @@ hp_manifest_load() {
     case "$key" in
       ENTRY_FORMAT) HP_ENTRY_FORMAT="$value" ;;
       EXECUTION_PLATFORM) HP_EXECUTION_PLATFORM="$value" ;;
+      QUALIFICATION_OS) HP_QUALIFICATION_OS="$value" ;;
       SOURCE_PACKAGE) HP_SOURCE_PACKAGE="$value" ;;
       COMPRESSOR) HP_COMPRESSOR="$value" ;;
       COMPRESSOR_FORMAT) HP_COMPRESSOR_FORMAT="$value" ;;
@@ -94,6 +100,16 @@ hp_manifest_load() {
   case "$HP_EXECUTION_PLATFORM" in
     linux-x86|linux-x86_64|windows-x86|windows-x86_64) ;;
     *) hp_manifest_die "unsupported EXECUTION_PLATFORM" || return ;;
+  esac
+  [[ -n "$HP_QUALIFICATION_OS" ]] \
+    || { hp_manifest_die "missing QUALIFICATION_OS"; return; }
+  [[ "$HP_QUALIFICATION_OS" =~ ^[a-z0-9][a-z0-9.-]*$ ]] \
+    || { hp_manifest_die "QUALIFICATION_OS is not a plain catalog alias"; return; }
+  case "$HP_EXECUTION_PLATFORM" in
+    linux-x86|linux-x86_64)
+      hp_qualification_os_image "$HP_QUALIFICATION_OS" >/dev/null \
+        || { hp_manifest_die "unsupported QUALIFICATION_OS"; return; }
+      ;;
   esac
 
   local required
@@ -131,7 +147,7 @@ hp_manifest_load() {
     hp_manifest_die "self-extracting ARCHIVE_FORMAT must be executable, upx, or upx-overlay" || return
   fi
 
-  export HP_ENTRY_FORMAT HP_EXECUTION_PLATFORM HP_SOURCE_PACKAGE \
+  export HP_ENTRY_FORMAT HP_EXECUTION_PLATFORM HP_QUALIFICATION_OS HP_SOURCE_PACKAGE \
     HP_COMPRESSOR HP_COMPRESSOR_FORMAT HP_COMPRESSOR_ARGUMENTS \
     HP_ARCHIVE HP_ARCHIVE_FORMAT HP_DECOMPRESSED_OUTPUT \
     HP_DECOMPRESSOR HP_DECOMPRESSOR_FORMAT HP_DECOMPRESSOR_ARGUMENTS

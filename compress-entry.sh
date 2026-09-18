@@ -6,7 +6,7 @@ source "$script_dir/lib/entry-env.sh"
 source "$script_dir/lib/prize-limits.sh"
 source "$script_dir/lib/resource-units.sh"
 source "$script_dir/lib/cold-cache.sh"
-image=hutter-prize-judging:local
+image=""
 entry_dir=""
 compressor_path=""
 reference_path="$script_dir/enwik9"
@@ -49,7 +49,7 @@ Options:
   --runtime-exec-policy P    strict or process-tree (default: strict)
   --cold-cache               Evict and verify enwik9 before container start
   --expected-size N          Expected input bytes (default: 1000000000)
-  --image NAME               Default: hutter-prize-judging:local
+  --image NAME               Override the catalog-derived local image tag
 EOF
 }
 
@@ -132,6 +132,10 @@ fi
 [[ -d "$entry_dir" && ! -L "$entry_dir" ]] || die "invalid entry directory: $entry_dir"
 hp_manifest_load "$entry_dir/entry.env" || exit 2
 hp_manifest_require_linux || exit 2
+image="${image:-$(hp_qualification_os_image_tag "$HP_QUALIFICATION_OS")}" \
+  || die "could not derive qualification image tag"
+hp_qualification_os_verify_image "$image" "$HP_QUALIFICATION_OS" \
+  || die "Docker image does not match entry QUALIFICATION_OS"
 hp_arguments_validate "$entry_dir/$HP_COMPRESSOR_ARGUMENTS" \
   COMPRESSOR_ARGUMENTS || exit 2
 [[ -f "$compressor_path" && ! -L "$compressor_path" ]] || die "invalid compressor"

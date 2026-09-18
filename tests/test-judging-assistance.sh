@@ -135,6 +135,7 @@ EOF
   cat > "$entry_dir/entry.env" <<'EOF'
 ENTRY_FORMAT=self-extracting
 EXECUTION_PLATFORM=linux-x86_64
+QUALIFICATION_OS=ubuntu-22.04
 SOURCE_PACKAGE=submission.tar.gz
 COMPRESSOR=comp9
 COMPRESSOR_FORMAT=executable
@@ -228,6 +229,7 @@ printf 'full flow fixture\n' > "$test_dir/Entries/Separate/archive9.bhm"
 cat > "$test_dir/Entries/Separate/entry.env" <<'EOF'
 ENTRY_FORMAT=separate-decompressor
 EXECUTION_PLATFORM=linux-x86_64
+QUALIFICATION_OS=ubuntu-22.04
 SOURCE_PACKAGE=submission.tar.gz
 COMPRESSOR=comp9a
 COMPRESSOR_FORMAT=executable

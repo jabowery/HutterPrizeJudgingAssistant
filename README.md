@@ -17,6 +17,14 @@ The authoritative rules remain the
 [Hutter Prize detailed rules](https://www.hutter1.net/prize/hrules.htm).
 Entrants should follow [ENTRANT_INSTRUCTIONS.md](ENTRANT_INSTRUCTIONS.md).
 
+Each entry declares a `QUALIFICATION_OS` catalog alias in `entry.env`. The
+Linux worker currently provides `ubuntu-20.04`, `ubuntu-22.04`, and
+`ubuntu-24.04`; trusted code maps each alias to a digest-pinned official Docker
+image. The selected image supplies one coherent userspace for the common
+worker, Geekbench calibration, dependency installation, compilation,
+compression, and decompression. Entrant-controlled registry references are not
+accepted.
+
 ## Run
 
 From the repository root:
@@ -62,6 +70,8 @@ containerized Geekbench calibration when neither `--geekbench-score` nor
 `--time-limit-seconds` is supplied. `--geekbench-score N` reuses a separately
 verified result, while `--time-limit-seconds N` is a mutually exclusive
 diagnostic override.
+For archive-only qualification, `--qualification-os NAME` selects the same
+trusted catalog explicitly; its default is `ubuntu-22.04`.
 Automatic calibration evidence is retained within the qualification results
 tree. `--preflight-only` remains non-executing and records the time limit as
 uncalibrated when no score is supplied.
@@ -312,6 +322,7 @@ does not let an entrant declare its own score.
 ./tests/test-host-security-preflight.sh
 ./tests/test-validate-executable.sh
 ./tests/test-example-entry.sh
+./tests/test-qualification-os.sh
 ./tests/test-resource-units.sh
 ./tests/test-cold-cache.sh
 ./tests/test-docker-elevation.sh
@@ -320,7 +331,9 @@ does not let an entrant declare its own score.
 ./tests/test-judging-assistance.sh
 ```
 
-The terminology test enforces the human/software distinction above. The
+The qualification-OS test verifies the allow-listed aliases, pinned image
+references, manifest rejection, and parameterized Dockerfile stages. The
+terminology test enforces the human/software distinction above. The
 security-preflight test covers required confinement failures, local-daemon
 enforcement, and remapped and unremapped UID behavior. The executable-validation
 test checks that pure and overlay UPX artifacts are inspected and then executed

@@ -8,7 +8,7 @@ source "$script_dir/lib/dependency-image.sh"
 source "$script_dir/lib/prize-limits.sh"
 source "$script_dir/lib/resource-units.sh"
 source "$script_dir/lib/cold-cache.sh"
-image=hutter-prize-judging:local
+image=""
 entry_dir=""
 reference_path="$script_dir/enwik9"
 results_path="$script_dir/Results"
@@ -52,7 +52,7 @@ Options:
   --work-root DIR            Required filesystem with at least 100 GB free
   --geekbench-score N        Reuse a score instead of calibrating
   --results DIR              Default: ./Results
-  --image NAME               Default: hutter-prize-judging:local
+  --image NAME               Override the catalog-derived local image tag
   --memory-limit-bytes N     Formal peak-RSS limit (default: 10 GiB)
   --disk-limit-bytes N       Default: 100 GB
   --disk-poll-seconds N      Default: 10
@@ -337,7 +337,12 @@ mkdir -p -- "$run_results/generated"
 qualification_container_file="$run_results/qualification-container-id"
 
 echo "Building the common judging image..." >&2
-docker build --tag "$image" "$script_dir" >&2 \
+qualification_os="$HP_QUALIFICATION_OS"
+qualification_os_image="$(hp_qualification_os_image "$qualification_os")" \
+  || stage_fail common_image "unsupported qualification OS"
+image="${image:-$(hp_qualification_os_image_tag "$qualification_os")}" \
+  || stage_fail common_image "could not derive qualification image tag"
+hp_qualification_os_build "$qualification_os" "$image" "$script_dir" >&2 \
   || stage_fail common_image "Docker image build failed"
 
 if [[ "$cold_cache" == true ]]; then
@@ -391,7 +396,9 @@ command_line_sha256="$(sha256sum "$entry_dir/$HP_COMPRESSOR_ARGUMENTS" | awk '{p
 
 if [[ -z "$geekbench_score" ]]; then
   geekbench_score="$("$script_dir/benchmark.sh" \
-    --skip-build --image "$image" --results "$run_results/calibration")" \
+    --skip-build --image "$image" \
+    --qualification-os "$qualification_os" \
+    --results "$run_results/calibration")" \
     || stage_fail geekbench "automatic calibration failed"
 fi
 time_limit_seconds="$(awk -v score="$geekbench_score" \
@@ -405,6 +412,7 @@ IFS=$'\t' read -r dependency_build_image dependency_runtime_image \
   <<< "$dependency_images"
 
 common_limits=(
+  --qualification-os "$qualification_os"
   --geekbench-score "$geekbench_score"
   --memory-limit-bytes "$memory_limit_bytes"
   --disk-limit-bytes "$disk_limit_bytes"
@@ -637,6 +645,8 @@ fi
   echo "cold_cache=$cold_cache"
   echo "entry_format=$HP_ENTRY_FORMAT"
   echo "execution_platform=$HP_EXECUTION_PLATFORM"
+  echo "qualification_os=$qualification_os"
+  echo "qualification_os_image=$qualification_os_image"
   echo "archives_identical=$archives_identical"
   echo "second_decompression=$second_decompression"
   echo "rebuilt_decompressor_identical=$rebuilt_decompressor_identical"
@@ -674,6 +684,8 @@ fi
   echo "Geekbench 5 T: $geekbench_score; limit per executable: $(hp_format_hms "$time_limit_seconds")"
   echo "RAM peak-RSS limit: $(hp_format_gib "$memory_limit_bytes")"
   echo "Execution-environment RAM: $(hp_format_gib "$HP_EXECUTION_RAM_BYTES")"
+  echo "Qualification OS: $qualification_os"
+  echo "Qualification image: $qualification_os_image"
   echo "Disk: $(hp_format_gb "$disk_limit_bytes")"
   echo "Execution mode: $execution_mode ($job_slots long-running job slots)"
   echo "Runtime executable policy: $runtime_exec_policy"

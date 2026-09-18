@@ -35,6 +35,7 @@ Linux `entry.env` example:
 ```text
 ENTRY_FORMAT=self-extracting
 EXECUTION_PLATFORM=linux-x86_64
+QUALIFICATION_OS=ubuntu-24.04
 SOURCE_PACKAGE=comp9.tar.gz
 COMPRESSOR=comp9
 COMPRESSOR_FORMAT=executable
@@ -49,6 +50,7 @@ Windows `entry.env` example:
 ```text
 ENTRY_FORMAT=self-extracting
 EXECUTION_PLATFORM=windows-x86_64
+QUALIFICATION_OS=windows-11
 SOURCE_PACKAGE=comp9.zip
 COMPRESSOR=comp9.exe
 COMPRESSOR_FORMAT=executable
@@ -92,6 +94,7 @@ Linux `entry.env` example:
 ```text
 ENTRY_FORMAT=separate-decompressor
 EXECUTION_PLATFORM=linux-x86_64
+QUALIFICATION_OS=ubuntu-24.04
 SOURCE_PACKAGE=comp9a.tar.gz
 COMPRESSOR=comp9a
 COMPRESSOR_FORMAT=executable
@@ -109,6 +112,7 @@ Windows `entry.env` example:
 ```text
 ENTRY_FORMAT=separate-decompressor
 EXECUTION_PLATFORM=windows-x86_64
+QUALIFICATION_OS=windows-11
 SOURCE_PACKAGE=comp9a.zip
 COMPRESSOR=comp9a.exe
 COMPRESSOR_FORMAT=executable
@@ -133,6 +137,11 @@ Values naming files must be basenames made from letters, digits, `.`, `_`, and
 
 The aliases have precise roles:
 
+- `QUALIFICATION_OS`: trusted catalog alias for the operating-system
+  userspace used to build, calibrate, compress, and decompress the entry. The
+  Linux worker currently accepts `ubuntu-20.04`, `ubuntu-22.04`, and
+  `ubuntu-24.04`. Each alias maps to an official digest-pinned Docker image;
+  registry references supplied by an entry are rejected.
 - `SOURCE_PACKAGE`: the one contestant source tar/ZIP package.
 - `COMPRESSOR`: exact regular executable that `build.sh` must create in its
   current working directory and the exact basename used during compression.
@@ -188,6 +197,12 @@ build the entry. Use it only to install system dependencies, including every
 shared library required by the submitted decompressor, rebuilt compressor, and
 generated decompressor. It must be noninteractive and repeatable. After it
 finishes, no entrant stage receives network access or root privileges.
+
+`install.sh` starts from the complete userspace selected by
+`QUALIFICATION_OS`. Select the OS on which the entry is intended to run rather
+than attempting to replace the selected distribution's C library with files
+from another release. The same selected userspace is used for Geekbench and
+every contestant executable in that run.
 
 The judging system retains the installed tools in an offline build image. It
 also creates a sanitized runtime image by starting again from the trusted
@@ -280,6 +295,8 @@ eligibility, and the spirit of the Prize.
 ## 9. Entrant preflight checklist
 
 - `entry.env` is at `Entries/NAME/entry.env` and names every submitted file.
+- `QUALIFICATION_OS` names a supported catalog entry matching the intended
+  build and runtime userspace.
 - Every filename is a basename and every alias matches the actual program's
   expectations exactly.
 - The source package has one top-level directory.

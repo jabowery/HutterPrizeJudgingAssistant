@@ -6,7 +6,7 @@ source "$script_dir/lib/entry-env.sh"
 source "$script_dir/lib/dependency-image.sh"
 source "$script_dir/lib/prize-limits.sh"
 source "$script_dir/lib/resource-units.sh"
-base_image=hutter-prize-judging:local
+base_image=""
 entry_dir=""
 output_path=""
 decompressor_output_path=""
@@ -31,7 +31,7 @@ Options:
                       Copy the declared DECOMPRESSOR to FILE (relaxed form)
   --results DIR       Store build evidence under DIR (default: ./Results)
   --work-root DIR     Filesystem for temporary build data (default: $TMPDIR)
-  --image NAME        Base judging image (default: hutter-prize-judging:local)
+  --image NAME        Override the catalog-derived local image tag
   --skip-base-build   Reuse the base judging image
   --dependency-build-image NAME
                       Reuse the install.sh build image prepared by the orchestrator
@@ -79,6 +79,8 @@ done
 entry_dir="$(realpath -- "$entry_dir")"
 hp_manifest_load "$entry_dir/entry.env" || exit 2
 hp_manifest_require_linux || exit 2
+base_image="${base_image:-$(hp_qualification_os_image_tag "$HP_QUALIFICATION_OS")}" \
+  || die "could not derive qualification image tag"
 for required in install.sh build.sh; do
   [[ -f "$entry_dir/$required" && ! -L "$entry_dir/$required" ]] \
     || die "entry is missing regular $required"
@@ -90,8 +92,10 @@ command -v docker >/dev/null || die "docker is not installed"
 
 if [[ "$skip_base_build" == true ]]; then
   docker image inspect "$base_image" >/dev/null || die "missing image: $base_image"
+  hp_qualification_os_verify_image "$base_image" "$HP_QUALIFICATION_OS" \
+    || die "Docker image does not match entry QUALIFICATION_OS"
 else
-  docker build --tag "$base_image" "$script_dir" >&2
+  hp_qualification_os_build "$HP_QUALIFICATION_OS" "$base_image" "$script_dir" >&2
 fi
 
 entry_name="$(basename -- "$entry_dir")"

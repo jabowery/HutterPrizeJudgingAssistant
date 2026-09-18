@@ -1,4 +1,6 @@
-FROM ubuntu:22.04@sha256:58b87898e82351c6cf9cf5b9f3c20257bb9e2dcf33af051e12ce532d7f94e3fe AS launcher-build
+ARG QUALIFICATION_OS=ubuntu-22.04
+ARG QUALIFICATION_OS_IMAGE=ubuntu:22.04@sha256:58b87898e82351c6cf9cf5b9f3c20257bb9e2dcf33af051e12ce532d7f94e3fe
+FROM ${QUALIFICATION_OS_IMAGE} AS launcher-build
 
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
@@ -10,7 +12,12 @@ RUN gcc -static -O2 -Wall -Wextra -Werror /src/exec-once.c -o /exec-once \
     && gcc -O2 -Wall -Wextra -Werror \
          /src/mincore-residency.c -o /mincore-residency
 
-FROM ubuntu:22.04@sha256:58b87898e82351c6cf9cf5b9f3c20257bb9e2dcf33af051e12ce532d7f94e3fe
+FROM ${QUALIFICATION_OS_IMAGE}
+
+ARG QUALIFICATION_OS
+ARG QUALIFICATION_OS_IMAGE
+LABEL org.hutterprize.qualification-os="$QUALIFICATION_OS" \
+      org.hutterprize.qualification-os-image="$QUALIFICATION_OS_IMAGE"
 
 ARG DEBIAN_FRONTEND=noninteractive
 
