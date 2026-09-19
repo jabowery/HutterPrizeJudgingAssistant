@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <grp.h>
 #include <linux/audit.h>
 #include <linux/filter.h>
 #include <linux/seccomp.h>
@@ -12,6 +13,7 @@
 #include <string.h>
 #include <sys/prctl.h>
 #include <sys/ptrace.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -21,6 +23,62 @@
 #define MAX_TASKS 8192
 #define PATH_BUFFER 4096
 #define CLONE_UNTRACED_FLAG 0x00800000ULL
+
+/*
+ * Landlock ABI 3 definitions are kept local so that the launcher remains
+ * buildable against the older userspace headers in every qualification OS.
+ * The running Docker host kernel, not those headers, supplies the ABI.
+ */
+#ifndef __NR_landlock_create_ruleset
+#if defined(__x86_64__) || defined(__i386__)
+#define __NR_landlock_create_ruleset 444
+#define __NR_landlock_add_rule 445
+#define __NR_landlock_restrict_self 446
+#else
+#error "Landlock syscall numbers are not defined for this architecture"
+#endif
+#endif
+
+#define HP_LANDLOCK_CREATE_RULESET_VERSION (1U << 0)
+#define HP_LANDLOCK_RULE_PATH_BENEATH 1
+#define HP_LANDLOCK_ACCESS_FS_EXECUTE (1ULL << 0)
+#define HP_LANDLOCK_ACCESS_FS_WRITE_FILE (1ULL << 1)
+#define HP_LANDLOCK_ACCESS_FS_READ_FILE (1ULL << 2)
+#define HP_LANDLOCK_ACCESS_FS_READ_DIR (1ULL << 3)
+#define HP_LANDLOCK_ACCESS_FS_REMOVE_DIR (1ULL << 4)
+#define HP_LANDLOCK_ACCESS_FS_REMOVE_FILE (1ULL << 5)
+#define HP_LANDLOCK_ACCESS_FS_MAKE_CHAR (1ULL << 6)
+#define HP_LANDLOCK_ACCESS_FS_MAKE_DIR (1ULL << 7)
+#define HP_LANDLOCK_ACCESS_FS_MAKE_REG (1ULL << 8)
+#define HP_LANDLOCK_ACCESS_FS_MAKE_SOCK (1ULL << 9)
+#define HP_LANDLOCK_ACCESS_FS_MAKE_FIFO (1ULL << 10)
+#define HP_LANDLOCK_ACCESS_FS_MAKE_BLOCK (1ULL << 11)
+#define HP_LANDLOCK_ACCESS_FS_MAKE_SYM (1ULL << 12)
+#define HP_LANDLOCK_ACCESS_FS_REFER (1ULL << 13)
+#define HP_LANDLOCK_ACCESS_FS_TRUNCATE (1ULL << 14)
+#define HP_LANDLOCK_MINIMUM_ABI 3
+
+#define HP_LANDLOCK_READ_ACCESS                                             \
+  (HP_LANDLOCK_ACCESS_FS_EXECUTE | HP_LANDLOCK_ACCESS_FS_READ_FILE |       \
+   HP_LANDLOCK_ACCESS_FS_READ_DIR)
+#define HP_LANDLOCK_WORK_ACCESS                                             \
+  (HP_LANDLOCK_READ_ACCESS | HP_LANDLOCK_ACCESS_FS_WRITE_FILE |            \
+   HP_LANDLOCK_ACCESS_FS_REMOVE_DIR | HP_LANDLOCK_ACCESS_FS_REMOVE_FILE |  \
+   HP_LANDLOCK_ACCESS_FS_MAKE_CHAR | HP_LANDLOCK_ACCESS_FS_MAKE_DIR |      \
+   HP_LANDLOCK_ACCESS_FS_MAKE_REG | HP_LANDLOCK_ACCESS_FS_MAKE_SOCK |      \
+   HP_LANDLOCK_ACCESS_FS_MAKE_FIFO | HP_LANDLOCK_ACCESS_FS_MAKE_BLOCK |    \
+   HP_LANDLOCK_ACCESS_FS_MAKE_SYM | HP_LANDLOCK_ACCESS_FS_REFER |          \
+   HP_LANDLOCK_ACCESS_FS_TRUNCATE)
+
+struct hp_landlock_ruleset_attr {
+  uint64_t handled_access_fs;
+};
+
+struct hp_landlock_path_beneath_attr {
+  uint64_t allowed_access;
+  int32_t parent_fd;
+  uint32_t reserved;
+};
 
 static pid_t tasks[MAX_TASKS];
 static size_t task_count = 0;
@@ -37,6 +95,138 @@ static volatile sig_atomic_t sample_due = 0;
 static void fatal(const char *message) {
   perror(message);
   exit(125);
+}
+
+static int landlock_abi(void) {
+  return (int)syscall(__NR_landlock_create_ruleset, NULL, 0,
+                      HP_LANDLOCK_CREATE_RULESET_VERSION);
+}
+
+static void landlock_add_path(int ruleset_fd, const char *path,
+                              uint64_t allowed_access, int required) {
+  struct hp_landlock_path_beneath_attr rule;
+  struct stat status;
+  int path_fd = open(path, O_PATH | O_CLOEXEC);
+  if (path_fd < 0) {
+    if (!required && errno == ENOENT) return;
+    fatal(path);
+  }
+  if (fstat(path_fd, &status) != 0) fatal("exec-once Landlock fstat");
+  if (!S_ISDIR(status.st_mode))
+    allowed_access &= ~HP_LANDLOCK_ACCESS_FS_READ_DIR;
+  memset(&rule, 0, sizeof(rule));
+  rule.allowed_access = allowed_access;
+  rule.parent_fd = path_fd;
+  if (syscall(__NR_landlock_add_rule, ruleset_fd,
+              HP_LANDLOCK_RULE_PATH_BENEATH, &rule, 0) != 0)
+    fatal("exec-once Landlock add rule");
+  close(path_fd);
+}
+
+static void apply_contestant_landlock(const char *workdir) {
+  static const char *const library_paths[] = {
+      "/opt/contestant-root/lib",
+      "/opt/contestant-root/lib64",
+      "/opt/contestant-root/usr/lib",
+      "/opt/contestant-root/usr/local/lib",
+  };
+  struct hp_landlock_ruleset_attr ruleset;
+  size_t i;
+  int ruleset_fd;
+  int abi = landlock_abi();
+  if (abi < HP_LANDLOCK_MINIMUM_ABI) {
+    if (abi < 0 && errno == ENOSYS)
+      fprintf(stderr, "exec-once: host kernel does not support Landlock\n");
+    else
+      fprintf(stderr, "exec-once: Landlock ABI %d is below required ABI %d\n",
+              abi, HP_LANDLOCK_MINIMUM_ABI);
+    exit(125);
+  }
+  memset(&ruleset, 0, sizeof(ruleset));
+  ruleset.handled_access_fs = HP_LANDLOCK_WORK_ACCESS;
+  ruleset_fd = (int)syscall(__NR_landlock_create_ruleset, &ruleset,
+                            sizeof(ruleset), 0);
+  if (ruleset_fd < 0) fatal("exec-once Landlock create ruleset");
+
+  landlock_add_path(ruleset_fd, workdir, HP_LANDLOCK_WORK_ACCESS, 1);
+  landlock_add_path(ruleset_fd, "/proc", HP_LANDLOCK_READ_ACCESS, 1);
+  landlock_add_path(ruleset_fd, "/dev/null",
+                    HP_LANDLOCK_ACCESS_FS_READ_FILE |
+                        HP_LANDLOCK_ACCESS_FS_WRITE_FILE,
+                    1);
+  landlock_add_path(ruleset_fd, "/bin/sh",
+                    HP_LANDLOCK_ACCESS_FS_EXECUTE |
+                        HP_LANDLOCK_ACCESS_FS_READ_FILE,
+                    1);
+  landlock_add_path(ruleset_fd, "/etc/ld.so.cache",
+                    HP_LANDLOCK_ACCESS_FS_READ_FILE, 0);
+  landlock_add_path(ruleset_fd, "/lib64/ld-linux-x86-64.so.2",
+                    HP_LANDLOCK_ACCESS_FS_EXECUTE |
+                        HP_LANDLOCK_ACCESS_FS_READ_FILE,
+                    0);
+  landlock_add_path(ruleset_fd, "/lib/ld-linux.so.2",
+                    HP_LANDLOCK_ACCESS_FS_EXECUTE |
+                        HP_LANDLOCK_ACCESS_FS_READ_FILE,
+                    0);
+  for (i = 0; i < sizeof(library_paths) / sizeof(library_paths[0]); ++i)
+    landlock_add_path(ruleset_fd, library_paths[i], HP_LANDLOCK_READ_ACCESS, 0);
+
+  if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0)
+    fatal("exec-once PR_SET_NO_NEW_PRIVS before Landlock");
+  if (syscall(__NR_landlock_restrict_self, ruleset_fd, 0) != 0)
+    fatal("exec-once Landlock restrict self");
+  close(ruleset_fd);
+}
+
+static int probe_landlock_enforcement(void) {
+  struct hp_landlock_ruleset_attr ruleset;
+  int denied_fd;
+  int ruleset_fd;
+  int abi = landlock_abi();
+  if (abi < 1) return -1;
+  memset(&ruleset, 0, sizeof(ruleset));
+  ruleset.handled_access_fs = HP_LANDLOCK_ACCESS_FS_READ_FILE;
+  ruleset_fd = (int)syscall(__NR_landlock_create_ruleset, &ruleset,
+                            sizeof(ruleset), 0);
+  if (ruleset_fd < 0) return -1;
+  if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) return -1;
+  if (syscall(__NR_landlock_restrict_self, ruleset_fd, 0) != 0) return -1;
+  close(ruleset_fd);
+  errno = 0;
+  denied_fd = open("/etc/passwd", O_RDONLY | O_CLOEXEC);
+  if (denied_fd >= 0) {
+    close(denied_fd);
+    errno = 0;
+    return -1;
+  }
+  return errno == EACCES ? abi : -1;
+}
+
+static void drop_contestant_credentials(void) {
+  int capability;
+#ifdef PR_CAP_AMBIENT
+  if (prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0) != 0 &&
+      errno != EINVAL)
+    fatal("exec-once clear ambient capabilities");
+#endif
+  for (capability = 0; capability < 64; ++capability) {
+    if (prctl(PR_CAPBSET_DROP, capability, 0, 0, 0) != 0 && errno != EINVAL)
+      fatal("exec-once drop capability bounding set");
+  }
+  if (setgroups(0, NULL) != 0) fatal("exec-once setgroups");
+  if (setgid(65532) != 0) fatal("exec-once setgid");
+  if (setuid(65532) != 0) fatal("exec-once setuid");
+  if (setenv("LD_LIBRARY_PATH",
+             "/opt/contestant-root/usr/local/lib:"
+             "/opt/contestant-root/lib/x86_64-linux-gnu:"
+             "/opt/contestant-root/usr/lib/x86_64-linux-gnu:"
+             "/opt/contestant-root/lib:"
+             "/opt/contestant-root/lib64:"
+             "/opt/contestant-root/usr/lib",
+             1) != 0)
+    fatal("exec-once set LD_LIBRARY_PATH");
+  if (prctl(PR_SET_DUMPABLE, 1, 0, 0, 0) != 0)
+    fatal("exec-once contestant dumpable state");
 }
 
 static int parse_fd(const char *value) {
@@ -345,6 +535,15 @@ int main(int argc, char **argv) {
   pid_t child;
   long options;
 
+  if (argc == 2 && strcmp(argv[1], "--landlock-probe") == 0) {
+    int abi = probe_landlock_enforcement();
+    if (abi < 1) {
+      if (abi < 0) perror("exec-once Landlock probe");
+      return 1;
+    }
+    printf("landlock_abi=%d\n", abi);
+    return 0;
+  }
   if (argc < 9) {
     fprintf(stderr,
             "usage: exec-once POLICY PROC_FD EVIDENCE_FD PEAK_FD "
@@ -373,6 +572,8 @@ int main(int argc, char **argv) {
   }
   memory_limit_bytes = parse_bytes(argv[6]);
   if (chdir(argv[7]) != 0) fatal("exec-once chdir");
+  if (prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0)
+    fatal("exec-once supervisor dumpable state");
 
   child = fork();
   if (child < 0) fatal("exec-once fork");
@@ -380,6 +581,8 @@ int main(int argc, char **argv) {
     int fd;
     if (evidence != NULL) close(fileno(evidence));
     for (fd = 3; fd <= 1024; ++fd) close(fd);
+    apply_contestant_landlock(argv[7]);
+    drop_contestant_credentials();
     if (setpgid(0, 0) != 0) fatal("exec-once setpgid");
     if (ptrace(PTRACE_TRACEME, 0, NULL, NULL) != 0)
       fatal("exec-once PTRACE_TRACEME");

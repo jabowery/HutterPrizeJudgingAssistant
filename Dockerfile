@@ -66,7 +66,6 @@ RUN chmod 0555 \
          /opt/contestant-root/lib/x86_64-linux-gnu \
          /opt/contestant-root/lib64 \
          /opt/contestant-root/dev \
-         /opt/contestant-root/proc/self \
          /opt/contestant-root/usr/lib/x86_64-linux-gnu \
          /opt/contestant-root/work \
     && cp /usr/local/bin/exec-once /opt/contestant-root/bin/exec-once \

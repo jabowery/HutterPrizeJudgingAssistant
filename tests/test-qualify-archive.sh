@@ -22,12 +22,42 @@ cat > "$test_dir/Entries/Good/archive9" <<'EOF'
 set -eu
 test -r archive9
 test ! -e /reference/enwik9
-test ! -e /usr/bin
-test ! -e /bin/gzip
-test ! -e /bin/bsdtar
-test ! -e /proc/self/status
+if (: < /etc/passwd) 2>/dev/null; then
+  echo "contestant escaped the filesystem allowlist" >&2
+  exit 1
+fi
+test -r /proc/self/statm
+test -r /proc/self/maps
+read -r _resident_pages < /proc/self/statm
+test -n "$_resident_pages"
+: < /proc/self/maps
 test -L /proc/self/exe
 test -r /proc/self/exe
+_uid_line=
+_cap_eff=
+_cap_bnd=
+while IFS=: read -r _key _value; do
+  case "$_key" in
+    Uid) _uid_line=$_value ;;
+    CapEff) _cap_eff=$_value ;;
+    CapBnd) _cap_bnd=$_value ;;
+  esac
+done < /proc/self/status
+case "$_uid_line" in *65532*) ;; *) exit 1 ;; esac
+case "$_cap_eff" in *0000000000000000*) ;; *) exit 1 ;; esac
+case "$_cap_bnd" in *0000000000000000*) ;; *) exit 1 ;; esac
+if (printf 'forbidden\n' > /proc/self/comm) 2>/dev/null; then
+  echo "contestant procfs was writable" >&2
+  exit 1
+fi
+if (: < /proc/1/maps) 2>/dev/null; then
+  echo "contestant could read the trusted supervisor maps" >&2
+  exit 1
+fi
+if (: < /proc/1/fd/9) 2>/dev/null; then
+  echo "contestant could duplicate a trusted supervisor descriptor" >&2
+  exit 1
+fi
 test ! -e /proc/1/root
 printf 'small judging fixture\n' > data9
 EOF
@@ -35,7 +65,7 @@ EOF
 cat > "$test_dir/Entries/Fork/archive9" <<'EOF'
 #!/bin/sh
 set -eu
-(printf 'small judging fixture\n' > data9) &
+(: < /proc/self/statm; printf 'small judging fixture\n' > data9) &
 wait
 EOF
 
@@ -141,6 +171,14 @@ grep -q '^Time limit: 00:00:30 (explicit override; no Geekbench score)$' "$good_
 grep -q '^Memory peak-RSS limit: 0.125 GiB$' "$good_report"
 grep -q '^Execution-environment RAM: 16 GiB$' "$good_report"
 grep -q '^Disk limit: 0.1048576 GB allocated (sampled every 00:00:01)$' "$good_report"
+good_procfs_evidence="$(find "$test_dir/good-results" \
+  -name procfs_scope -type f -print -quit)"
+good_result_dir="$(dirname -- "$good_procfs_evidence")"
+grep -q '^container-pid-namespace$' "$good_result_dir/procfs_scope"
+grep -q '^read-only-landlock$' "$good_result_dir/procfs_contestant_access"
+grep -q '^0$' "$good_result_dir/supervisor_uid"
+grep -q '^65532$' "$good_result_dir/contestant_uid"
+grep -Eq '^[1-9][0-9]*$' "$good_result_dir/landlock_abi"
 good_inspect="$(find "$test_dir/good-results" \
   -name container-inspect.json -type f -print -quit)"
 grep -q '"Memory": 17179869184' "$good_inspect"

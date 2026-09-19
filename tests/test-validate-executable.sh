@@ -49,6 +49,8 @@ grep -q '^execution_bytes_identical=yes$' "$overlay_evidence"
 # second executable, so the packed bytes also satisfy the exec-once monitor.
 docker run --rm --network none \
   --cap-drop ALL \
+  --cap-add SETUID --cap-add SETGID --cap-add KILL \
+  --cap-add DAC_READ_SEARCH --cap-add SETPCAP \
   --security-opt no-new-privileges=true \
   --mount "type=bind,source=$test_dir,target=/work/run,readonly" \
   hutter-prize-judging:local \

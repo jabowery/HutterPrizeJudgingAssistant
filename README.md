@@ -84,16 +84,17 @@ Cold-cache control requests `sudo` for the narrow
 `cold-cache-host-helper.sh`, even when the invoking user can already access
 Docker. The helper invokes `sync` and writes `3` to
 `/proc/sys/vm/drop_caches`; the residency verifier then runs without that
-elevation. Root permission is never granted to an entrant container.
+elevation. Root permission is never granted to entrant-provided code.
 
 Before any entrant-provided code is unpacked, built, or executed, the
 orchestrator runs a host-security preflight. It rejects a non-Linux daemon, a
 nonlocal Docker endpoint, inactive seccomp filtering, failure to apply
-`no-new-privileges`, or the absence of a verifiably enforcing AppArmor or
-SELinux container profile. It records the orchestration environment's reported
-kernel and the Docker daemon's reported kernel without requiring them to be the
-same. Thus virtualization supplied by the underlying environment is neither a
-prerequisite nor a reason for rejection. The checks follow Docker's documented
+`no-new-privileges`, a Landlock ABI older than 3, or the absence of a
+verifiably enforcing AppArmor or SELinux container profile. It records the
+orchestration environment's reported kernel and the Docker daemon's reported
+kernel without requiring them to be the same. Thus virtualization supplied by
+the underlying environment is neither a prerequisite nor a reason for
+rejection. The checks follow Docker's documented
 [capability and kernel-isolation model](https://docs.docker.com/engine/security/#linux-kernel-capabilities)
 and verify the resulting test container rather than relying only on daemon
 configuration.
@@ -212,9 +213,21 @@ no reference corpus, no source/build tree, and no other build outputs.
 Each output artifact is copied back to the host judging environment. The
 orchestrator checks that it is a regular file and records its size, SHA-256
 digest, and type before another container can receive it. The trusted execution
-monitor always traces the complete descendant tree. Under the default `strict`
+monitor always traces the complete descendant tree. It runs as a non-dumpable
+UID 0 supervisor and creates the entrant process as UID/GID 65532 after
+dropping the entrant's capability bounding set. Under the default `strict`
 policy it permits the one declared executable transition and rejects later
 `execve`/`execveat` calls.
+
+The entrant receives the container's genuine procfs, scoped by Docker's PID
+namespace, so ordinary Linux interfaces such as `/proc/self/statm`,
+`/proc/self/maps`, and `/proc/self/exe` retain their kernel semantics. Landlock
+makes procfs read-only to the entrant and restricts filesystem access to the
+working directory, procfs, the dynamic loader and libraries, `/bin/sh`, and
+`/dev/null`. Kernel procfs permission checks prevent UID 65532 from opening the
+trusted UID 0 supervisor's maps, executable, or file descriptors. Host
+processes remain outside the container PID namespace. No contestant process
+receives `CAP_SYS_ADMIN` or permission to mount a filesystem.
 
 The explicitly selected `process-tree` relaxation permits later executable
 transitions without creating new size or resource allowances. This accommodates
@@ -232,12 +245,13 @@ when the submitted or rebuilt executables run. The orchestrator derives two
 images from that one installation: an offline build image retaining the
 installed tools, and a runtime image that starts again from the trusted common
 image and adds only loader-visible files from the standard system library
-trees to the entrant's chroot. The collection itself occurs in a fresh trusted
-stage, not through utilities that `install.sh` could have replaced. Thus an
-installation cannot replace the trusted worker scripts or execution monitor.
-The monitor is statically linked so entrant-installed C libraries cannot alter
-it. The same runtime image is used for submitted decompression, rebuilt
-compression, and any required generated-archive decompression.
+trees to a dedicated runtime-library prefix. The execution monitor supplies
+that prefix to the entrant's dynamic loader. Collection occurs in a fresh
+trusted stage, not through utilities that `install.sh` could have replaced.
+Thus an installation cannot replace the trusted worker scripts or execution
+monitor. The monitor is statically linked so entrant-installed C libraries
+cannot alter it. The same runtime image is used for submitted decompression,
+rebuilt compression, and any required generated-archive decompression.
 
 The source build returns only the executable role(s) declared in `entry.env`.
 Other build outputs never enter a scored runtime.

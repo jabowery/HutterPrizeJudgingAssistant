@@ -53,8 +53,10 @@ set -eu
 cat > comp9 <<'COMPRESSOR'
 #!/bin/sh
 set -eu
-test ! -e /usr/bin
-test ! -e /bin/gzip
+if (: < /etc/passwd) 2>/dev/null; then
+  echo "compressor escaped the filesystem allowlist" >&2
+  exit 1
+fi
 printf '%s\\n' \\
   '#!/bin/sh' \\
   '# $generated_comment' \\

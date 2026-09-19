@@ -39,7 +39,7 @@ chmod 0555 "$test_dir/bin/docker"
 
 readonly orchestrator_kernel="$(uname -r)"
 readonly apparmor_options='name=apparmor\nname=seccomp,profile=builtin\n'
-readonly apparmor_probe='seccomp=2\nno_new_privs=1\nuid_map=0:0:4294967295\nlsm_context=docker-default (enforce)\n'
+readonly apparmor_probe='seccomp=2\nno_new_privs=1\nuid_map=0:0:4294967295\nlsm_context=docker-default (enforce)\nlandlock_abi=4\n'
 
 FAKE_DOCKER_KERNEL="$orchestrator_kernel" \
 FAKE_DOCKER_SECURITY_OPTIONS="$apparmor_options" \
@@ -52,13 +52,14 @@ grep -q '^preflight_status=PASS$' "$test_dir/pass.env"
 grep -q "^orchestrator_kernel=$orchestrator_kernel$" "$test_dir/pass.env"
 grep -q "^docker_daemon_kernel=$orchestrator_kernel$" "$test_dir/pass.env"
 grep -q '^enforcing_lsm=apparmor$' "$test_dir/pass.env"
+grep -q '^runtime_landlock_abi=4$' "$test_dir/pass.env"
 grep -q '^identity_boundary=none$' "$test_dir/pass.env"
 grep -q '^identity_boundary_advisory=present$' "$test_dir/pass.env"
 grep -q '^kernel_patch_currency=unverified$' "$test_dir/pass.env"
 grep -q 'rootful without UID remapping' "$test_dir/pass.stderr"
 
 remapped_options='name=apparmor\nname=seccomp,profile=builtin\nname=userns\n'
-remapped_probe='seccomp=2\nno_new_privs=1\nuid_map=0:231072:65536\nlsm_context=docker-default (enforce)\n'
+remapped_probe='seccomp=2\nno_new_privs=1\nuid_map=0:231072:65536\nlsm_context=docker-default (enforce)\nlandlock_abi=4\n'
 FAKE_DOCKER_KERNEL="$orchestrator_kernel" \
 FAKE_DOCKER_SECURITY_OPTIONS="$remapped_options" \
 FAKE_DOCKER_PROBE="$remapped_probe" \
@@ -109,8 +110,14 @@ expect_failure no-seccomp 'name=apparmor\n' "$apparmor_probe" \
 expect_failure no-lsm 'name=seccomp,profile=builtin\n' "$apparmor_probe" \
   'neither AppArmor nor SELinux'
 expect_failure unconfined "$apparmor_options" \
-  'seccomp=2\nno_new_privs=1\nuid_map=0:0:4294967295\nlsm_context=unconfined\n' \
+  'seccomp=2\nno_new_privs=1\nuid_map=0:0:4294967295\nlsm_context=unconfined\nlandlock_abi=4\n' \
   'no verifiably enforcing AppArmor or SELinux profile'
+expect_failure no-landlock "$apparmor_options" \
+  'seccomp=2\nno_new_privs=1\nuid_map=0:0:4294967295\nlsm_context=docker-default (enforce)\n' \
+  'does not provide a usable Landlock ABI'
+expect_failure old-landlock "$apparmor_options" \
+  'seccomp=2\nno_new_privs=1\nuid_map=0:0:4294967295\nlsm_context=docker-default (enforce)\nlandlock_abi=2\n' \
+  'Landlock ABI is older than required ABI 3'
 
 set +e
 FAKE_DOCKER_ENDPOINT='tcp://127.0.0.1:2375' \

@@ -208,10 +208,9 @@ active_container="$(docker create \
   --pids-limit 4096 --ulimit nofile=65536:65536 \
   --cap-drop ALL \
   --cap-add SETUID --cap-add SETGID --cap-add KILL \
-  --cap-add DAC_READ_SEARCH --cap-add SETPCAP --cap-add SYS_CHROOT \
+  --cap-add DAC_READ_SEARCH --cap-add SETPCAP \
   --security-opt no-new-privileges=true \
   --tmpfs /run:rw,nosuid,nodev,noexec,size=16777216 \
-  --tmpfs /opt/contestant-root/proc/self:rw,nosuid,nodev,noexec,mode=0755,size=4096 \
   --mount type=bind,source=/dev/null,target=/opt/contestant-root/dev/null \
   --mount "type=bind,source=$active_work_dir,target=/work" \
   --mount "type=bind,source=$active_work_dir,target=/opt/contestant-root/work" \

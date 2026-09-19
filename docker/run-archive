@@ -17,7 +17,6 @@ readonly executable_name="${EXECUTABLE_NAME:?EXECUTABLE_NAME is required}"
 readonly arguments_name="${ARGUMENTS_NAME:?ARGUMENTS_NAME is required}"
 readonly runtime_exec_policy="${RUNTIME_EXEC_POLICY:-strict}"
 readonly executable="$run_dir/$executable_name"
-readonly proc_self_dir=/opt/contestant-root/proc/self
 
 case "$expected_size:$time_limit_seconds:$memory_limit_bytes:$disk_limit_bytes:$disk_poll_seconds" in
   *[!0-9:]*|'')
@@ -37,12 +36,11 @@ if [[ ! -x "$executable" || ! -f "$run_dir/$arguments_name" \
   echo "The staged executable or argument vector is invalid." >&2
   exit 2
 fi
-if [[ ! -d "$proc_self_dir" || -e "$proc_self_dir/exe" \
-    || -L "$proc_self_dir/exe" ]]; then
-  echo "The private proc/self staging directory is invalid." >&2
+if [[ ! -r /proc/self/statm || ! -r /proc/self/maps \
+    || ! -L /proc/self/exe ]]; then
+  echo "The container-scoped procfs is unavailable." >&2
   exit 2
 fi
-ln -s -- "/work/run/$executable_name" "$proc_self_dir/exe"
 
 write_report_value() {
   local name="$1"
@@ -71,14 +69,20 @@ write_report_value deadline_epoch "$((deadline_epoch_nanoseconds / 1000000000))"
 write_report_value time_limit_exceeded no
 write_report_value time_limit_exceeded_epoch not_exceeded
 write_report_value runtime_exec_policy "$runtime_exec_policy"
+write_report_value procfs_scope container-pid-namespace
+write_report_value procfs_contestant_access read-only-landlock
+write_report_value supervisor_uid 0
+write_report_value contestant_uid 65532
+write_report_value landlock_abi \
+  "$(/opt/contestant-root/bin/exec-once --landlock-probe \
+      | awk -F= '$1 == "landlock_abi" {print $2}')"
 cd "$run_dir"
 mapfile -t executable_arguments < "$run_dir/$arguments_name"
 
 hp_open_monitor_descriptors "$report_dir"
 set +e
 /usr/bin/time --verbose --output="$report_dir/time.txt" \
-  chroot --userspec=65532:65532 --groups= \
-    /opt/contestant-root /bin/exec-once "$runtime_exec_policy" \
+  /opt/contestant-root/bin/exec-once "$runtime_exec_policy" \
     9 8 7 6 "$memory_limit_bytes" /work/run \
     "./$executable_name" "${executable_arguments[@]}" \
   >"$report_dir/stdout.log" 2>"$report_dir/stderr.log" &

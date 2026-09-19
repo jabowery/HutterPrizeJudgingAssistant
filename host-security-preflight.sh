@@ -10,7 +10,8 @@ Usage: ./host-security-preflight.sh --image IMAGE --report FILE
 
 Verify the Docker Linux security boundary before any entrant-provided code is
 executed. The check requires a Linux Docker daemon, seccomp filtering,
-no-new-privileges, and an enforcing AppArmor or SELinux container profile.
+no-new-privileges, Landlock, and an enforcing AppArmor or SELinux container
+profile.
 The underlying environment may be native or virtualized; this script neither
 requires nor rejects virtualization. Rootless Docker or UID remapping is
 reported as an additional boundary; its absence produces a warning.
@@ -125,18 +126,21 @@ probe_output="$(docker run --rm \
     else
       printf "lsm_context=unavailable\n"
     fi
+    /usr/local/bin/exec-once --landlock-probe
   ')" || die "could not execute the trusted Docker confinement probe"
 
 runtime_seccomp=""
 runtime_no_new_privs=""
 runtime_uid_map=""
 runtime_lsm_context=""
+runtime_landlock_abi=""
 while IFS='=' read -r key value; do
   case "$key" in
     seccomp) runtime_seccomp="$value" ;;
     no_new_privs) runtime_no_new_privs="$value" ;;
     uid_map) runtime_uid_map="$value" ;;
     lsm_context) runtime_lsm_context="$value" ;;
+    landlock_abi) runtime_landlock_abi="$value" ;;
   esac
 done <<< "$probe_output"
 
@@ -144,6 +148,10 @@ done <<< "$probe_output"
   || die "test container is not running in seccomp filter mode"
 [[ "$runtime_no_new_privs" == 1 ]] \
   || die "test container does not have no-new-privileges set"
+[[ "$runtime_landlock_abi" =~ ^[0-9]+$ ]] \
+  || die "Docker host kernel does not provide a usable Landlock ABI"
+(( runtime_landlock_abi >= 3 )) \
+  || die "Docker host kernel Landlock ABI is older than required ABI 3"
 
 enforcing_lsm=""
 if [[ "$apparmor_option" == yes \
@@ -183,6 +191,7 @@ fi
   echo "seccomp_option=$seccomp_option"
   echo "runtime_seccomp_mode=$runtime_seccomp"
   echo "runtime_no_new_privs=$runtime_no_new_privs"
+  echo "runtime_landlock_abi=$runtime_landlock_abi"
   echo "enforcing_lsm=$enforcing_lsm"
   echo "runtime_lsm_context=$runtime_lsm_context"
   echo "rootless_option=$rootless_option"

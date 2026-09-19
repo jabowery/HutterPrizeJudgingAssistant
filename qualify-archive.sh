@@ -717,10 +717,8 @@ for entry_dir in "${entry_dirs[@]}"; do
     --cap-add KILL \
     --cap-add DAC_READ_SEARCH \
     --cap-add SETPCAP \
-    --cap-add SYS_CHROOT \
     --security-opt no-new-privileges=true \
     --tmpfs /run:rw,nosuid,nodev,noexec,size=16777216 \
-    --tmpfs /opt/contestant-root/proc/self:rw,nosuid,nodev,noexec,mode=0755,size=4096 \
     --mount type=bind,source=/dev/null,target=/opt/contestant-root/dev/null \
     "${work_mount_rw[@]}" \
     "${work_mount_sandbox_rw[@]}" \
