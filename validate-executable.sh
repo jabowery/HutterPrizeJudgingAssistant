@@ -24,10 +24,17 @@ Options:
   --output FILE     Required validated execution-copy destination
   --results DIR     Evidence directory (default: ./Results)
   --image NAME      Judging image (default: hutter-prize-judging:local)
+  -h, --help        Show this help
 EOF
 }
 
 die() { echo "error: $*" >&2; exit 2; }
+usage_error() {
+  echo "error: $*" >&2
+  echo >&2
+  usage >&2
+  exit 2
+}
 cleanup() {
   if [[ -n "$active_output_dir" && -d "$active_output_dir" ]]; then
     docker run --rm --network none \
@@ -41,20 +48,20 @@ trap 'exit 130' INT TERM
 
 while (( $# > 0 )); do
   case "$1" in
-    --format) (( $# >= 2 )) || die "$1 requires a value"; artifact_format="$2"; shift 2 ;;
-    --output) (( $# >= 2 )) || die "$1 requires a value"; output_path="$2"; shift 2 ;;
-    --results) (( $# >= 2 )) || die "$1 requires a value"; results_path="$2"; shift 2 ;;
-    --image) (( $# >= 2 )) || die "$1 requires a value"; image="$2"; shift 2 ;;
+    --format) (( $# >= 2 )) || usage_error "$1 requires a value"; artifact_format="$2"; shift 2 ;;
+    --output) (( $# >= 2 )) || usage_error "$1 requires a value"; output_path="$2"; shift 2 ;;
+    --results) (( $# >= 2 )) || usage_error "$1 requires a value"; results_path="$2"; shift 2 ;;
+    --image) (( $# >= 2 )) || usage_error "$1 requires a value"; image="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
-    -*) die "unknown option: $1" ;;
-    *) [[ -z "$artifact_path" ]] || die "only one ARTIFACT may be supplied"; artifact_path="$1"; shift ;;
+    -*) usage_error "unknown option: $1" ;;
+    *) [[ -z "$artifact_path" ]] || usage_error "only one ARTIFACT may be supplied"; artifact_path="$1"; shift ;;
   esac
 done
 
 [[ "$artifact_format" == executable || "$artifact_format" == upx \
     || "$artifact_format" == upx-overlay ]] \
-  || die "--format must be executable, upx, or upx-overlay"
-[[ -n "$output_path" ]] || die "--output is required"
+  || usage_error "--format must be executable, upx, or upx-overlay"
+[[ -n "$output_path" ]] || usage_error "--output is required"
 [[ -f "$artifact_path" && ! -L "$artifact_path" ]] || die "invalid ARTIFACT"
 [[ ! -e "$output_path" && ! -L "$output_path" ]] || die "output already exists: $output_path"
 docker image inspect "$image" >/dev/null || die "missing image: $image"

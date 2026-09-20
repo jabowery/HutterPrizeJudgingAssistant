@@ -96,6 +96,13 @@ die() {
   exit 2
 }
 
+usage_error() {
+  echo "error: $*" >&2
+  echo >&2
+  usage >&2
+  exit 2
+}
+
 restore_invoking_user_ownership() {
   local owner
   (( EUID == 0 )) || return 0
@@ -168,7 +175,7 @@ trap cleanup_active EXIT
 trap 'exit 130' INT TERM
 
 require_value() {
-  (( $# >= 2 )) || die "$1 requires a value"
+  (( $# >= 2 )) || usage_error "$1 requires a value"
 }
 
 while (( $# > 0 )); do
@@ -308,7 +315,7 @@ while (( $# > 0 )); do
       break
       ;;
     -*)
-      die "unknown option: $1"
+      usage_error "unknown option: $1"
       ;;
     *)
       if [[ -z "$entries_path" ]]; then
@@ -316,14 +323,14 @@ while (( $# > 0 )); do
       elif [[ -z "$reference_path" ]]; then
         reference_path="$1"
       else
-        die "unexpected positional argument: $1"
+        usage_error "unexpected positional argument: $1"
       fi
       shift
       ;;
   esac
 done
 
-(( $# == 0 )) || die "unexpected positional arguments"
+(( $# == 0 )) || usage_error "unexpected positional arguments"
 
 entries_path="${entries_path:-$script_dir/Entries}"
 reference_path="${reference_path:-$script_dir/enwik9}"
@@ -332,18 +339,18 @@ for numeric_value in \
   expected_size memory_limit_bytes disk_limit_bytes \
   disk_poll_seconds record_size; do
   value="${!numeric_value}"
-  [[ "$value" =~ ^[1-9][0-9]*$ ]] || die "$numeric_value must be a positive integer"
+  [[ "$value" =~ ^[1-9][0-9]*$ ]] || usage_error "$numeric_value must be a positive integer"
 done
 
 if [[ "$preflight_only" != true && "$expected_size" == 1000000000 \
     && "$cold_cache" != true ]]; then
-  die "formal enwik9 runs require --cold-cache"
+  usage_error "formal enwik9 runs require --cold-cache"
 fi
 if [[ "$cold_cache" == true && "$preflight_only" == true ]]; then
-  die "--cold-cache cannot be combined with --preflight-only"
+  usage_error "--cold-cache cannot be combined with --preflight-only"
 fi
 if [[ -n "$cold_cache_helper" && "$cold_cache" != true ]]; then
-  die "--cold-cache-helper requires --cold-cache"
+  usage_error "--cold-cache-helper requires --cold-cache"
 fi
 if [[ -n "$container_id_file" ]]; then
   [[ ! -e "$container_id_file" && ! -L "$container_id_file" ]] \
@@ -354,31 +361,31 @@ if [[ -n "$container_id_file" ]]; then
     || die "invalid container ID file directory: $container_id_parent"
   container_id_file="$(realpath --canonicalize-missing -- "$container_id_file")"
 fi
-[[ "$cpu_limit" =~ ^[0-9]+([.][0-9]+)?$ ]] || die "cpus must be a positive number"
+[[ "$cpu_limit" =~ ^[0-9]+([.][0-9]+)?$ ]] || usage_error "cpus must be a positive number"
 awk -v cpus="$cpu_limit" 'BEGIN { exit !(cpus > 0) }' \
-  || die "cpus must be greater than zero"
+  || usage_error "cpus must be greater than zero"
 case "$runtime_exec_policy" in
   strict|process-tree) ;;
-  *) die "runtime-exec-policy must be strict or process-tree" ;;
+  *) usage_error "runtime-exec-policy must be strict or process-tree" ;;
 esac
 qualification_os_image="$(hp_qualification_os_image "$qualification_os")" \
-  || die "invalid qualification OS"
+  || usage_error "invalid qualification OS"
 image="${image:-$(hp_qualification_os_image_tag "$qualification_os")}" \
   || die "could not derive qualification image tag"
 
 if [[ -n "$geekbench_score" ]]; then
   [[ "$geekbench_score" =~ ^[1-9][0-9]*$ ]] \
-    || die "geekbench_score must be a positive integer"
+    || usage_error "geekbench_score must be a positive integer"
   geekbench_score_source=supplied
 fi
 
 if [[ -n "$geekbench_score" && -n "$time_limit_seconds" ]]; then
-  die "--geekbench-score and --time-limit-seconds are mutually exclusive"
+  usage_error "--geekbench-score and --time-limit-seconds are mutually exclusive"
 fi
 
 if [[ -n "$time_limit_seconds" ]]; then
   [[ "$time_limit_seconds" =~ ^[1-9][0-9]*$ ]] \
-    || die "time_limit_seconds must be a positive integer"
+    || usage_error "time_limit_seconds must be a positive integer"
   geekbench_score_source=not_used_time_override
 elif [[ "$preflight_only" == true && -z "$geekbench_score" ]]; then
   time_limit_seconds=not_calibrated
@@ -393,24 +400,24 @@ else
 fi
 
 [[ -n "$archive_name" && "$archive_name" =~ ^[A-Za-z0-9._-]+$ ]] \
-  || die "executable must be a plain file name"
+  || usage_error "executable must be a plain file name"
 [[ -z "$payload_name" || "$payload_name" =~ ^[A-Za-z0-9._-]+$ ]] \
-  || die "payload name must be a plain file name"
+  || usage_error "payload name must be a plain file name"
 if [[ -n "$arguments_file" ]]; then
   [[ -f "$arguments_file" && ! -L "$arguments_file" ]] \
     || die "invalid arguments file: $arguments_file"
   arguments_file="$(realpath -- "$arguments_file")"
 fi
 if [[ -n "$payload_file" ]]; then
-  [[ -n "$payload_name" ]] || die "--payload-file requires --payload-name"
+  [[ -n "$payload_name" ]] || usage_error "--payload-file requires --payload-name"
   [[ -f "$payload_file" && ! -L "$payload_file" ]] \
     || die "invalid payload file: $payload_file"
   payload_file="$(realpath -- "$payload_file")"
 elif [[ -n "$payload_name" ]]; then
-  die "--payload-name requires --payload-file"
+  usage_error "--payload-name requires --payload-file"
 fi
 [[ -n "$expected_output" && "$expected_output" =~ ^[A-Za-z0-9._-]+$ ]] \
-  || die "--output is required and must be a plain file name"
+  || usage_error "--output is required and must be a plain file name"
 
 [[ -d "$entries_path" ]] || die "entries directory not found: $entries_path"
 entries_path="$(realpath -- "$entries_path")"

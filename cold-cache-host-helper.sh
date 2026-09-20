@@ -8,8 +8,27 @@ set -Eeuo pipefail
 prepare_lock=false
 target=""
 
+usage() {
+  cat <<'EOF'
+Usage:
+  sudo ./cold-cache-host-helper.sh --prepare-lock
+  sudo ./cold-cache-host-helper.sh --target FILE
+
+Prepare the judging system's host cache-eviction lock, or evict clean cache
+pages and report evidence for one exact regular file. This narrowly privileged
+helper is normally invoked by the orchestrator, not run directly.
+EOF
+}
+
 die() {
   echo "error: cold-cache helper: $*" >&2
+  exit 2
+}
+
+usage_error() {
+  echo "error: cold-cache helper: $*" >&2
+  echo >&2
+  usage >&2
   exit 2
 }
 
@@ -20,17 +39,24 @@ while (( $# > 0 )); do
       shift
       ;;
     --target)
-      (( $# >= 2 )) || die "$1 requires a value"
+      (( $# >= 2 )) || usage_error "$1 requires a value"
       target="$2"
       shift 2
       ;;
-    *) die "unknown option: $1" ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *) usage_error "unknown option: $1" ;;
   esac
 done
 
+if [[ "$prepare_lock" != true && -z "$target" ]]; then
+  usage_error "--prepare-lock or --target FILE is required"
+fi
 (( EUID == 0 )) || die "must run as root"
 if [[ "$prepare_lock" == true ]]; then
-  [[ -z "$target" ]] || die "--prepare-lock does not accept --target"
+  [[ -z "$target" ]] || usage_error "--prepare-lock does not accept --target"
   lock_path=/run/lock/hutter-prize-cold-cache.lock
   mkdir -p -- /run/lock
   if [[ ! -e "$lock_path" && ! -L "$lock_path" ]]; then

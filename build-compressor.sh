@@ -35,10 +35,17 @@ Options:
   --skip-base-build   Reuse the base judging image
   --dependency-build-image NAME
                       Reuse the install.sh build image prepared by the orchestrator
+  -h, --help          Show this help
 EOF
 }
 
 die() { echo "error: $*" >&2; exit 2; }
+usage_error() {
+  echo "error: $*" >&2
+  echo >&2
+  usage >&2
+  exit 2
+}
 cleanup() {
   [[ -z "$active_container" ]] || docker rm --force "$active_container" >/dev/null 2>&1 || true
   if [[ -n "$active_work_dir" && -d "$active_work_dir" ]]; then
@@ -53,28 +60,28 @@ trap 'exit 130' INT TERM
 
 while (( $# > 0 )); do
   case "$1" in
-    --output) (( $# >= 2 )) || die "$1 requires a value"; output_path="$2"; shift 2 ;;
+    --output) (( $# >= 2 )) || usage_error "$1 requires a value"; output_path="$2"; shift 2 ;;
     --decompressor-output)
-      (( $# >= 2 )) || die "$1 requires a value"
+      (( $# >= 2 )) || usage_error "$1 requires a value"
       decompressor_output_path="$2"
       shift 2
       ;;
-    --results) (( $# >= 2 )) || die "$1 requires a value"; results_path="$2"; shift 2 ;;
-    --work-root) (( $# >= 2 )) || die "$1 requires a value"; work_root="$2"; shift 2 ;;
-    --image) (( $# >= 2 )) || die "$1 requires a value"; base_image="$2"; shift 2 ;;
+    --results) (( $# >= 2 )) || usage_error "$1 requires a value"; results_path="$2"; shift 2 ;;
+    --work-root) (( $# >= 2 )) || usage_error "$1 requires a value"; work_root="$2"; shift 2 ;;
+    --image) (( $# >= 2 )) || usage_error "$1 requires a value"; base_image="$2"; shift 2 ;;
     --skip-base-build) skip_base_build=true; shift ;;
     --dependency-build-image)
-      (( $# >= 2 )) || die "$1 requires a value"
+      (( $# >= 2 )) || usage_error "$1 requires a value"
       dependency_build_image_override="$2"
       shift 2
       ;;
     -h|--help) usage; exit 0 ;;
-    -*) die "unknown option: $1" ;;
-    *) [[ -z "$entry_dir" ]] || die "only one ENTRY_DIR may be supplied"; entry_dir="$1"; shift ;;
+    -*) usage_error "unknown option: $1" ;;
+    *) [[ -z "$entry_dir" ]] || usage_error "only one ENTRY_DIR may be supplied"; entry_dir="$1"; shift ;;
   esac
 done
 
-[[ -n "$entry_dir" ]] || die "ENTRY_DIR is required"
+[[ -n "$entry_dir" ]] || usage_error "ENTRY_DIR is required"
 [[ -d "$entry_dir" && ! -L "$entry_dir" ]] || die "invalid entry directory: $entry_dir"
 entry_dir="$(realpath -- "$entry_dir")"
 hp_manifest_load "$entry_dir/entry.env" || exit 2

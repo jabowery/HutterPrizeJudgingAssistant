@@ -15,6 +15,11 @@ profile.
 The underlying environment may be native or virtualized; this script neither
 requires nor rejects virtualization. Rootless Docker or UID remapping is
 reported as an additional boundary; its absence produces a warning.
+
+Options:
+  --image IMAGE    Container image to probe
+  --report FILE    New evidence file to create
+  -h, --help       Show this help
 EOF
 }
 
@@ -23,15 +28,22 @@ die() {
   exit 2
 }
 
+usage_error() {
+  echo "error: host security preflight: $*" >&2
+  echo >&2
+  usage >&2
+  exit 2
+}
+
 while (( $# > 0 )); do
   case "$1" in
     --image)
-      (( $# >= 2 )) || die "$1 requires a value"
+      (( $# >= 2 )) || usage_error "$1 requires a value"
       image="$2"
       shift 2
       ;;
     --report)
-      (( $# >= 2 )) || die "$1 requires a value"
+      (( $# >= 2 )) || usage_error "$1 requires a value"
       report_path="$2"
       shift 2
       ;;
@@ -39,12 +51,12 @@ while (( $# > 0 )); do
       usage
       exit 0
       ;;
-    *) die "unknown option: $1" ;;
+    *) usage_error "unknown option: $1" ;;
   esac
 done
 
-[[ -n "$image" ]] || die "--image is required"
-[[ -n "$report_path" ]] || die "--report is required"
+[[ -n "$image" ]] || usage_error "--image is required"
+[[ -n "$report_path" ]] || usage_error "--report is required"
 [[ -d "$(dirname -- "$report_path")" ]] \
   || die "report directory does not exist"
 [[ ! -e "$report_path" && ! -L "$report_path" ]] \

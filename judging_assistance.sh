@@ -63,10 +63,17 @@ Options:
   --cold-cache               Required for a formal enwik9 run; requires --serial
   --record-size N            Default: 110793128
   --expected-size N          Expected corpus bytes (default: 1000000000)
+  -h, --help                 Show this help
 EOF
 }
 
 die() { echo "error: $*" >&2; exit 2; }
+usage_error() {
+  echo "error: $*" >&2
+  echo >&2
+  usage >&2
+  exit 2
+}
 require_docker_daemon() {
   local diagnostic
   command -v docker >/dev/null \
@@ -251,54 +258,54 @@ stage_fail() {
 declare -a positional=()
 while (( $# > 0 )); do
   case "$1" in
-    --work-root) (( $# >= 2 )) || die "$1 requires a value"; work_root="$2"; shift 2 ;;
-    --geekbench-score) (( $# >= 2 )) || die "$1 requires a value"; geekbench_score="$2"; shift 2 ;;
-    --results) (( $# >= 2 )) || die "$1 requires a value"; results_path="$2"; shift 2 ;;
-    --image) (( $# >= 2 )) || die "$1 requires a value"; image="$2"; shift 2 ;;
-    --memory-limit-bytes) (( $# >= 2 )) || die "$1 requires a value"; memory_limit_bytes="$2"; shift 2 ;;
-    --disk-limit-bytes) (( $# >= 2 )) || die "$1 requires a value"; disk_limit_bytes="$2"; shift 2 ;;
-    --disk-poll-seconds) (( $# >= 2 )) || die "$1 requires a value"; disk_poll_seconds="$2"; shift 2 ;;
-    --cpus) (( $# >= 2 )) || die "$1 requires a value"; cpu_limit="$2"; shift 2 ;;
-    --runtime-exec-policy) (( $# >= 2 )) || die "$1 requires a value"; runtime_exec_policy="$2"; shift 2 ;;
-    --jobs) (( $# >= 2 )) || die "$1 requires a value"; job_slots="$2"; shift 2 ;;
+    --work-root) (( $# >= 2 )) || usage_error "$1 requires a value"; work_root="$2"; shift 2 ;;
+    --geekbench-score) (( $# >= 2 )) || usage_error "$1 requires a value"; geekbench_score="$2"; shift 2 ;;
+    --results) (( $# >= 2 )) || usage_error "$1 requires a value"; results_path="$2"; shift 2 ;;
+    --image) (( $# >= 2 )) || usage_error "$1 requires a value"; image="$2"; shift 2 ;;
+    --memory-limit-bytes) (( $# >= 2 )) || usage_error "$1 requires a value"; memory_limit_bytes="$2"; shift 2 ;;
+    --disk-limit-bytes) (( $# >= 2 )) || usage_error "$1 requires a value"; disk_limit_bytes="$2"; shift 2 ;;
+    --disk-poll-seconds) (( $# >= 2 )) || usage_error "$1 requires a value"; disk_poll_seconds="$2"; shift 2 ;;
+    --cpus) (( $# >= 2 )) || usage_error "$1 requires a value"; cpu_limit="$2"; shift 2 ;;
+    --runtime-exec-policy) (( $# >= 2 )) || usage_error "$1 requires a value"; runtime_exec_policy="$2"; shift 2 ;;
+    --jobs) (( $# >= 2 )) || usage_error "$1 requires a value"; job_slots="$2"; shift 2 ;;
     --serial) job_slots=1; shift ;;
     --cold-cache) cold_cache=true; shift ;;
-    --record-size) (( $# >= 2 )) || die "$1 requires a value"; record_size="$2"; shift 2 ;;
-    --expected-size) (( $# >= 2 )) || die "$1 requires a value"; expected_size="$2"; shift 2 ;;
+    --record-size) (( $# >= 2 )) || usage_error "$1 requires a value"; record_size="$2"; shift 2 ;;
+    --expected-size) (( $# >= 2 )) || usage_error "$1 requires a value"; expected_size="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
-    -*) die "unknown option: $1" ;;
+    -*) usage_error "unknown option: $1" ;;
     *) positional+=("$1"); shift ;;
   esac
 done
 (( ${#positional[@]} == 1 || ${#positional[@]} == 2 )) \
-  || die "ENTRY_DIR and optional ENWIK9 are required"
+  || usage_error "ENTRY_DIR and optional ENWIK9 are required"
 entry_dir="${positional[0]}"
 (( ${#positional[@]} == 1 )) || reference_path="${positional[1]}"
 
 for numeric_name in memory_limit_bytes disk_limit_bytes disk_poll_seconds record_size expected_size; do
   value="${!numeric_name}"
-  [[ "$value" =~ ^[1-9][0-9]*$ ]] || die "$numeric_name must be a positive integer"
+  [[ "$value" =~ ^[1-9][0-9]*$ ]] || usage_error "$numeric_name must be a positive integer"
 done
 [[ "$cpu_limit" =~ ^[0-9]+([.][0-9]+)?$ ]] \
   && awk -v n="$cpu_limit" 'BEGIN { exit !(n > 0) }' \
-  || die "cpus must be positive"
+  || usage_error "cpus must be positive"
 [[ "$job_slots" == 1 || "$job_slots" == 2 ]] \
-  || die "jobs must be 1 or 2"
+  || usage_error "jobs must be 1 or 2"
 if [[ "$expected_size" == 1000000000 && "$cold_cache" != true ]]; then
-  die "formal enwik9 runs require --cold-cache"
+  usage_error "formal enwik9 runs require --cold-cache"
 fi
 if [[ "$cold_cache" == true && "$job_slots" != 1 ]]; then
-  die "--cold-cache refuses parallel execution; also specify --serial or --jobs 1"
+  usage_error "--cold-cache refuses parallel execution; also specify --serial or --jobs 1"
 fi
 case "$runtime_exec_policy" in
   strict|process-tree) ;;
-  *) die "runtime-exec-policy must be strict or process-tree" ;;
+  *) usage_error "runtime-exec-policy must be strict or process-tree" ;;
 esac
 [[ -z "$geekbench_score" || "$geekbench_score" =~ ^[1-9][0-9]*$ ]] \
-  || die "invalid Geekbench score"
+  || usage_error "invalid Geekbench score"
 [[ -d "$entry_dir" && ! -L "$entry_dir" ]] || die "invalid entry directory: $entry_dir"
 [[ -f "$reference_path" && ! -L "$reference_path" ]] || die "invalid enwik9"
-[[ -n "$work_root" ]] || die "--work-root is required"
+[[ -n "$work_root" ]] || usage_error "--work-root is required"
 [[ -d "$work_root" && ! -L "$work_root" && -w "$work_root" ]] \
   || die "invalid or unwritable work root: $work_root"
 entry_dir="$(realpath -- "$entry_dir")"

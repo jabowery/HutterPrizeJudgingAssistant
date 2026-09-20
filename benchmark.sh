@@ -15,16 +15,29 @@ result_dir=""
 
 usage() {
   cat <<'EOF'
-Usage: ./benchmark.sh [--image NAME] [--qualification-os NAME] [--results DIR] [--skip-build]
+Usage: ./benchmark.sh [OPTIONS]
 
 Run the supplied Geekbench 5.5.1 Linux CPU benchmark inside the same Docker
 runtime used for judging. The Tryout edition requires temporary Internet access
 to upload its trusted result. Prints only the single-core score T on stdout;
 the complete log and calibration metadata are retained under Results/.
+
+Options:
+  --image NAME               Override the catalog-derived local image tag
+  --qualification-os NAME    Trusted catalog alias
+  --results DIR              Evidence directory (default: ./Results)
+  --skip-build               Reuse an existing image
+  -h, --help                 Show this help
 EOF
 }
 
 die() { echo "error: $*" >&2; exit 2; }
+usage_error() {
+  echo "error: $*" >&2
+  echo >&2
+  usage >&2
+  exit 2
+}
 restore_invoking_user_ownership() {
   local owner
   (( EUID == 0 )) || return 0
@@ -67,20 +80,20 @@ trap restore_invoking_user_ownership EXIT
 
 while (( $# > 0 )); do
   case "$1" in
-    --image) (( $# >= 2 )) || die "$1 requires a value"; image="$2"; shift 2 ;;
-    --qualification-os) (( $# >= 2 )) || die "$1 requires a value"; qualification_os="$2"; shift 2 ;;
-    --results) (( $# >= 2 )) || die "$1 requires a value"; results_path="$2"; shift 2 ;;
+    --image) (( $# >= 2 )) || usage_error "$1 requires a value"; image="$2"; shift 2 ;;
+    --qualification-os) (( $# >= 2 )) || usage_error "$1 requires a value"; qualification_os="$2"; shift 2 ;;
+    --results) (( $# >= 2 )) || usage_error "$1 requires a value"; results_path="$2"; shift 2 ;;
     --skip-build) skip_build=true; shift ;;
     -h|--help) usage; exit 0 ;;
-    *) die "unknown argument: $1" ;;
+    *) usage_error "unknown argument: $1" ;;
   esac
 done
 
-require_docker_daemon
 qualification_os_image="$(hp_qualification_os_image "$qualification_os")" \
-  || die "invalid qualification OS"
+  || usage_error "invalid qualification OS"
 image="${image:-$(hp_qualification_os_image_tag "$qualification_os")}" \
   || die "could not derive qualification image tag"
+require_docker_daemon
 if [[ "$skip_build" == true ]]; then
   docker image inspect "$image" >/dev/null || die "Docker image does not exist: $image"
   hp_qualification_os_verify_image "$image" "$qualification_os" \

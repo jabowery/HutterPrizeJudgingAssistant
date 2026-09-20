@@ -50,10 +50,17 @@ Options:
   --cold-cache               Evict and verify enwik9 before container start
   --expected-size N          Expected input bytes (default: 1000000000)
   --image NAME               Override the catalog-derived local image tag
+  -h, --help                 Show this help
 EOF
 }
 
 die() { echo "error: $*" >&2; exit 2; }
+usage_error() {
+  echo "error: $*" >&2
+  echo >&2
+  usage >&2
+  exit 2
+}
 read_report() {
   if [[ -r "$1" ]]; then
     tr -d '\r\n' < "$1"
@@ -79,52 +86,52 @@ trap 'exit 130' INT TERM
 declare -a positional=()
 while (( $# > 0 )); do
   case "$1" in
-    --output) (( $# >= 2 )) || die "$1 requires a value"; output_path="$2"; shift 2 ;;
-    --results) (( $# >= 2 )) || die "$1 requires a value"; results_path="$2"; shift 2 ;;
-    --work-root) (( $# >= 2 )) || die "$1 requires a value"; work_root="$2"; shift 2 ;;
-    --geekbench-score) (( $# >= 2 )) || die "$1 requires a value"; geekbench_score="$2"; shift 2 ;;
-    --time-limit-seconds) (( $# >= 2 )) || die "$1 requires a value"; time_limit_seconds="$2"; shift 2 ;;
-    --memory-limit-bytes) (( $# >= 2 )) || die "$1 requires a value"; memory_limit_bytes="$2"; shift 2 ;;
-    --disk-limit-bytes) (( $# >= 2 )) || die "$1 requires a value"; disk_limit_bytes="$2"; shift 2 ;;
-    --disk-poll-seconds) (( $# >= 2 )) || die "$1 requires a value"; disk_poll_seconds="$2"; shift 2 ;;
-    --cpus) (( $# >= 2 )) || die "$1 requires a value"; cpu_limit="$2"; shift 2 ;;
-    --runtime-exec-policy) (( $# >= 2 )) || die "$1 requires a value"; runtime_exec_policy="$2"; shift 2 ;;
+    --output) (( $# >= 2 )) || usage_error "$1 requires a value"; output_path="$2"; shift 2 ;;
+    --results) (( $# >= 2 )) || usage_error "$1 requires a value"; results_path="$2"; shift 2 ;;
+    --work-root) (( $# >= 2 )) || usage_error "$1 requires a value"; work_root="$2"; shift 2 ;;
+    --geekbench-score) (( $# >= 2 )) || usage_error "$1 requires a value"; geekbench_score="$2"; shift 2 ;;
+    --time-limit-seconds) (( $# >= 2 )) || usage_error "$1 requires a value"; time_limit_seconds="$2"; shift 2 ;;
+    --memory-limit-bytes) (( $# >= 2 )) || usage_error "$1 requires a value"; memory_limit_bytes="$2"; shift 2 ;;
+    --disk-limit-bytes) (( $# >= 2 )) || usage_error "$1 requires a value"; disk_limit_bytes="$2"; shift 2 ;;
+    --disk-poll-seconds) (( $# >= 2 )) || usage_error "$1 requires a value"; disk_poll_seconds="$2"; shift 2 ;;
+    --cpus) (( $# >= 2 )) || usage_error "$1 requires a value"; cpu_limit="$2"; shift 2 ;;
+    --runtime-exec-policy) (( $# >= 2 )) || usage_error "$1 requires a value"; runtime_exec_policy="$2"; shift 2 ;;
     --cold-cache) cold_cache=true; shift ;;
-    --cold-cache-helper) (( $# >= 2 )) || die "$1 requires a value"; cold_cache_helper="$2"; shift 2 ;;
-    --expected-size) (( $# >= 2 )) || die "$1 requires a value"; expected_size="$2"; shift 2 ;;
-    --image) (( $# >= 2 )) || die "$1 requires a value"; image="$2"; shift 2 ;;
+    --cold-cache-helper) (( $# >= 2 )) || usage_error "$1 requires a value"; cold_cache_helper="$2"; shift 2 ;;
+    --expected-size) (( $# >= 2 )) || usage_error "$1 requires a value"; expected_size="$2"; shift 2 ;;
+    --image) (( $# >= 2 )) || usage_error "$1 requires a value"; image="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
-    -*) die "unknown option: $1" ;;
+    -*) usage_error "unknown option: $1" ;;
     *) positional+=("$1"); shift ;;
   esac
 done
-(( ${#positional[@]} == 3 )) || die "ENTRY_DIR, COMPRESSOR, and ENWIK9 are required"
+(( ${#positional[@]} == 3 )) || usage_error "ENTRY_DIR, COMPRESSOR, and ENWIK9 are required"
 entry_dir="${positional[0]}"
 compressor_path="${positional[1]}"
 reference_path="${positional[2]}"
 
 for numeric_name in memory_limit_bytes disk_limit_bytes disk_poll_seconds expected_size; do
   value="${!numeric_name}"
-  [[ "$value" =~ ^[1-9][0-9]*$ ]] || die "$numeric_name must be a positive integer"
+  [[ "$value" =~ ^[1-9][0-9]*$ ]] || usage_error "$numeric_name must be a positive integer"
 done
 if [[ "$expected_size" == 1000000000 && "$cold_cache" != true ]]; then
-  die "formal enwik9 runs require --cold-cache"
+  usage_error "formal enwik9 runs require --cold-cache"
 fi
 if [[ -n "$cold_cache_helper" && "$cold_cache" != true ]]; then
-  die "--cold-cache-helper requires --cold-cache"
+  usage_error "--cold-cache-helper requires --cold-cache"
 fi
 [[ "$cpu_limit" =~ ^[0-9]+([.][0-9]+)?$ ]] \
   && awk -v n="$cpu_limit" 'BEGIN { exit !(n > 0) }' \
-  || die "cpus must be positive"
+  || usage_error "cpus must be positive"
 case "$runtime_exec_policy" in
   strict|process-tree) ;;
-  *) die "runtime-exec-policy must be strict or process-tree" ;;
+  *) usage_error "runtime-exec-policy must be strict or process-tree" ;;
 esac
 if [[ -n "$time_limit_seconds" ]]; then
-  [[ "$time_limit_seconds" =~ ^[1-9][0-9]*$ ]] || die "invalid time limit"
+  [[ "$time_limit_seconds" =~ ^[1-9][0-9]*$ ]] || usage_error "invalid time limit"
 else
   [[ "$geekbench_score" =~ ^[1-9][0-9]*$ ]] \
-    || die "--geekbench-score is required unless time is overridden"
+    || usage_error "--geekbench-score is required unless time is overridden"
   time_limit_seconds="$(awk -v score="$geekbench_score" \
     'BEGIN { print int((70000 * 3600) / score) }')"
 fi
@@ -140,7 +147,7 @@ hp_arguments_validate "$entry_dir/$HP_COMPRESSOR_ARGUMENTS" \
   COMPRESSOR_ARGUMENTS || exit 2
 [[ -f "$compressor_path" && ! -L "$compressor_path" ]] || die "invalid compressor"
 [[ -f "$reference_path" && ! -L "$reference_path" ]] || die "invalid enwik9"
-[[ -n "$work_root" ]] || die "--work-root is required for compression temporary data"
+[[ -n "$work_root" ]] || usage_error "--work-root is required for compression temporary data"
 [[ -d "$work_root" && ! -L "$work_root" && -w "$work_root" ]] \
   || die "invalid or unwritable work root: $work_root"
 entry_dir="$(realpath -- "$entry_dir")"
