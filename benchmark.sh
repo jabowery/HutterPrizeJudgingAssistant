@@ -161,12 +161,14 @@ if [[ ! "$score" =~ ^[1-9][0-9]*$ && -n "$result_url" ]]; then
   # Some builds print only the uploaded URL. Try the public result page; a
   # manual --geekbench-score remains available if the site blocks automation.
   page_file="$result_dir/result.html"
-  if curl --fail --silent --show-error --location \
+  if curl --fail --silent --location --max-time 30 \
       --user-agent 'HutterPrizeJudging/1.0' "$result_url" > "$page_file"; then
     score="$(sed -nE 's/.*class="score"[^>]*>[[:space:]]*([0-9]+).*/\1/p' \
       "$page_file" | head -1)"
-    score_source=official_result_page
-    result_evidence_file="$page_file"
+    if [[ "$score" =~ ^[1-9][0-9]*$ ]]; then
+      score_source=official_result_page
+      result_evidence_file="$page_file"
+    fi
   fi
 fi
 
@@ -174,14 +176,29 @@ if [[ ! "$score" =~ ^[1-9][0-9]*$ && -n "$result_url" ]]; then
   # Cloudflare may require an interactive browser even for a public result.
   # Jina Reader is a transparent text fetcher: retain its complete response and
   # the authoritative Geekbench URL so a human judge can independently
-  # cross-check T.
+  # cross-check T. A newly uploaded page can transiently yield Cloudflare's
+  # challenge page with HTTP success, so require an actual score and retry.
   result_proxy_url="https://r.jina.ai/$result_url"
   page_file="$result_dir/result-via-jina.md"
-  if curl --fail --silent --show-error --location "$result_proxy_url" > "$page_file"; then
-    score="$(extract_text_score "$page_file")"
-    score_source=jina_reader_of_official_result
-    result_evidence_file="$page_file"
-  fi
+  for result_attempt in 1 2 3 4 5 6; do
+    attempt_file="$page_file.attempt-$result_attempt"
+    if curl --fail --silent --show-error --location --max-time 60 \
+        --header 'X-No-Cache: true' \
+        "$result_proxy_url" > "$attempt_file"; then
+      score="$(extract_text_score "$attempt_file")"
+      if [[ "$score" =~ ^[1-9][0-9]*$ ]]; then
+        mv -- "$attempt_file" "$page_file"
+        score_source=jina_reader_of_official_result
+        result_evidence_file="$page_file"
+        break
+      fi
+    fi
+    if (( result_attempt < 6 )); then
+      printf 'Geekbench result page is not readable yet; retrying score retrieval (%d/6)...\n' \
+        "$result_attempt" >&2
+      sleep 10
+    fi
+  done
 fi
 
 [[ "$score" =~ ^[1-9][0-9]*$ ]] \
