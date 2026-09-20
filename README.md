@@ -65,13 +65,18 @@ request `sudo` themselves only when access to the local Docker daemon requires
 it. Benchmarking builds only the common, entry-independent judging image; it
 does not require or inspect an entry source package.
 
-Before an execution run, `qualify-archive.sh` automatically runs that
+When given one entry directory, `qualify-archive.sh` reads its `entry.env` and
+uses the declared archive or decompressor, output name, arguments, payload, and
+qualification OS. Explicit artifact and OS options are overrides for diagnostic
+use, not information the human official must normally repeat. A legacy batch
+run lacking one unambiguous manifest must name its common artifacts explicitly.
+
+Before an execution run, `qualify-archive.sh` automatically runs the
 containerized Geekbench calibration when neither `--geekbench-score` nor
 `--time-limit-seconds` is supplied. `--geekbench-score N` reuses a separately
 verified result, while `--time-limit-seconds N` is a mutually exclusive
-diagnostic override.
-For archive-only qualification, `--qualification-os NAME` selects the same
-trusted catalog explicitly; its default is `ubuntu-22.04`.
+diagnostic override. If no manifest and no explicit `--qualification-os` are
+available, the trusted catalog fallback is `ubuntu-22.04`.
 Automatic calibration evidence is retained within the qualification results
 tree. `--preflight-only` remains non-executing and records the time limit as
 uncalibrated when no score is supplied.

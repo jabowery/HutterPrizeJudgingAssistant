@@ -7,9 +7,10 @@ source "$script_dir/lib/prize-limits.sh"
 source "$script_dir/lib/resource-units.sh"
 source "$script_dir/lib/cold-cache.sh"
 source "$script_dir/lib/qualification-os.sh"
+source "$script_dir/lib/entry-env.sh"
 
 image=""
-qualification_os="$HP_DEFAULT_QUALIFICATION_OS"
+qualification_os=""
 entries_path=""
 reference_path=""
 results_path="$script_dir/Results"
@@ -51,20 +52,21 @@ usage() {
 Usage:
   ./qualify-archive.sh [OPTIONS] [ENTRIES_DIR [ENWIK9]]
 
-Run one explicitly named contestant executable from every immediate
-subdirectory of ENTRIES_DIR, or from ENTRIES_DIR itself when it contains that
-executable. Artifact names are never inferred.
+Qualify the archive declared by entry.env when ENTRIES_DIR is one entry
+directory (or --entry selects one child). Explicit artifact options override
+the manifest. Batch runs without one unambiguous manifest require explicit
+artifact options.
 
 Options:
   --enwik9 FILE              Reference enwik9 (default: ./enwik9)
   --entry NAME               Process only NAME; may be repeated
   --results DIR              Result directory (default: ./Results)
   --work-root DIR            Put isolated work directories on this filesystem
-  --executable NAME          Required entrant-declared executable basename
+  --executable NAME          Override the manifest-declared executable
   --arguments-file FILE      Literal argument vector, one argument per line
   --payload-file FILE        Optional read-only input payload
   --payload-name NAME        Entrant-declared basename for that payload
-  --output NAME              Required entrant-declared output basename
+  --output NAME              Override the manifest-declared output basename
   --geekbench-score N        Reuse a verified score instead of calibrating
   --time-limit-seconds N     Override 70000/T and skip calibration
   --memory-limit-bytes N     Formal peak-RSS limit (default: 10 GiB)
@@ -76,7 +78,7 @@ Options:
   --record-size N            Previous record L (default: 110793128)
   --expected-size N          Reference/output size (default: 1000000000)
   --image NAME               Override the catalog-derived local image tag
-  --qualification-os NAME    Trusted catalog alias (default: ubuntu-22.04)
+  --qualification-os NAME    Override manifest OS (fallback: ubuntu-22.04)
   --skip-build               Use an existing image
   --preflight-only           Inventory and score without executing submissions
   --keep-work                Keep per-entry Docker volumes for inspection
@@ -368,10 +370,6 @@ case "$runtime_exec_policy" in
   strict|process-tree) ;;
   *) usage_error "runtime-exec-policy must be strict or process-tree" ;;
 esac
-qualification_os_image="$(hp_qualification_os_image "$qualification_os")" \
-  || usage_error "invalid qualification OS"
-image="${image:-$(hp_qualification_os_image_tag "$qualification_os")}" \
-  || die "could not derive qualification image tag"
 
 if [[ -n "$geekbench_score" ]]; then
   [[ "$geekbench_score" =~ ^[1-9][0-9]*$ ]] \
@@ -399,8 +397,71 @@ else
   time_limit_seconds=pending_calibration
 fi
 
+[[ -d "$entries_path" ]] || die "entries directory not found: $entries_path"
+entries_path="$(realpath -- "$entries_path")"
+
+if [[ "$preflight_only" != true ]]; then
+  [[ -f "$reference_path" && ! -L "$reference_path" ]] \
+    || die "reference file not found or is a symbolic link: $reference_path"
+  reference_path="$(realpath -- "$reference_path")"
+  actual_reference_size="$(stat --format='%s' -- "$reference_path")"
+  [[ "$actual_reference_size" == "$expected_size" ]] \
+    || die "reference is $actual_reference_size bytes; expected $expected_size"
+fi
+
+declare -a entry_dirs=()
+if (( ${#selected_entries[@]} > 0 )); then
+  for selected_entry in "${selected_entries[@]}"; do
+    [[ "$selected_entry" != */* && "$selected_entry" != . && "$selected_entry" != .. ]] \
+      || usage_error "--entry requires a child name without slashes; pass an entry directory as ENTRIES_DIR instead"
+    [[ -d "$entries_path/$selected_entry" ]] \
+      || usage_error "selected entry not found: $selected_entry"
+    entry_dirs+=("$entries_path/$selected_entry")
+  done
+elif [[ -f "$entries_path/entry.env" \
+    || ( -n "$archive_name" && -f "$entries_path/$archive_name" ) ]]; then
+  entry_dirs+=("$entries_path")
+else
+  while IFS= read -r -d '' entry_dir; do
+    entry_dirs+=("$entry_dir")
+  done < <(find -P "$entries_path" -mindepth 1 -maxdepth 1 -type d \
+             -print0 | sort -z)
+fi
+
+(( ${#entry_dirs[@]} > 0 )) || die "no entry directories found in $entries_path"
+
+manifest_path=""
+manifest_entry_format=""
+manifest_executable_format=""
+if (( ${#entry_dirs[@]} == 1 )) \
+    && [[ -f "${entry_dirs[0]}/entry.env" \
+      && ! -L "${entry_dirs[0]}/entry.env" ]]; then
+  manifest_path="${entry_dirs[0]}/entry.env"
+  hp_manifest_load "$manifest_path" || exit 2
+  hp_manifest_require_linux || exit 2
+  manifest_entry_format="$HP_ENTRY_FORMAT"
+  qualification_os="${qualification_os:-$HP_QUALIFICATION_OS}"
+  expected_output="${expected_output:-$HP_DECOMPRESSED_OUTPUT}"
+  if [[ "$HP_ENTRY_FORMAT" == self-extracting ]]; then
+    archive_name="${archive_name:-$HP_ARCHIVE}"
+    manifest_executable_format="$HP_ARCHIVE_FORMAT"
+  else
+    archive_name="${archive_name:-$HP_DECOMPRESSOR}"
+    arguments_file="${arguments_file:-${entry_dirs[0]}/$HP_DECOMPRESSOR_ARGUMENTS}"
+    payload_file="${payload_file:-${entry_dirs[0]}/$HP_ARCHIVE}"
+    payload_name="${payload_name:-$HP_ARCHIVE}"
+    manifest_executable_format="$HP_DECOMPRESSOR_FORMAT"
+  fi
+fi
+
+qualification_os="${qualification_os:-$HP_DEFAULT_QUALIFICATION_OS}"
+qualification_os_image="$(hp_qualification_os_image "$qualification_os")" \
+  || usage_error "invalid qualification OS"
+image="${image:-$(hp_qualification_os_image_tag "$qualification_os")}" \
+  || die "could not derive qualification image tag"
+
 [[ -n "$archive_name" && "$archive_name" =~ ^[A-Za-z0-9._-]+$ ]] \
-  || usage_error "executable must be a plain file name"
+  || usage_error "--executable is required without one unambiguous entry.env and must be a plain file name"
 [[ -z "$payload_name" || "$payload_name" =~ ^[A-Za-z0-9._-]+$ ]] \
   || usage_error "payload name must be a plain file name"
 if [[ -n "$arguments_file" ]]; then
@@ -417,19 +478,7 @@ elif [[ -n "$payload_name" ]]; then
   usage_error "--payload-name requires --payload-file"
 fi
 [[ -n "$expected_output" && "$expected_output" =~ ^[A-Za-z0-9._-]+$ ]] \
-  || usage_error "--output is required and must be a plain file name"
-
-[[ -d "$entries_path" ]] || die "entries directory not found: $entries_path"
-entries_path="$(realpath -- "$entries_path")"
-
-if [[ "$preflight_only" != true ]]; then
-  [[ -f "$reference_path" && ! -L "$reference_path" ]] \
-    || die "reference file not found or is a symbolic link: $reference_path"
-  reference_path="$(realpath -- "$reference_path")"
-  actual_reference_size="$(stat --format='%s' -- "$reference_path")"
-  [[ "$actual_reference_size" == "$expected_size" ]] \
-    || die "reference is $actual_reference_size bytes; expected $expected_size"
-fi
+  || usage_error "--output is required without one unambiguous entry.env and must be a plain file name"
 
 if [[ "$preflight_only" != true ]]; then
   require_docker_daemon
@@ -503,26 +552,6 @@ if [[ "$preflight_only" != true ]]; then
     || die "work filesystem has $(hp_format_gb "$work_available_bytes") free; disk limit requires $(hp_format_gb "$disk_limit_bytes") (use --work-root)"
 fi
 
-declare -a entry_dirs=()
-if (( ${#selected_entries[@]} > 0 )); then
-  for selected_entry in "${selected_entries[@]}"; do
-    [[ "$selected_entry" != */* && "$selected_entry" != . && "$selected_entry" != .. ]] \
-      || die "entry names supplied with --entry may not contain slashes"
-    [[ -d "$entries_path/$selected_entry" ]] \
-      || die "selected entry not found: $selected_entry"
-    entry_dirs+=("$entries_path/$selected_entry")
-  done
-elif [[ -f "$entries_path/$archive_name" ]]; then
-  entry_dirs+=("$entries_path")
-else
-  while IFS= read -r -d '' entry_dir; do
-    entry_dirs+=("$entry_dir")
-  done < <(find -P "$entries_path" -mindepth 1 -maxdepth 1 -type d \
-             -print0 | sort -z)
-fi
-
-(( ${#entry_dirs[@]} > 0 )) || die "no entry directories found in $entries_path"
-
 summary_file="$run_results/summary.tsv"
 printf 'entry\tstatus\tarchive_bytes\tcompressor_bytes\ttotal_bytes\timprovement_percent\tresult_dir\n' \
   > "$summary_file"
@@ -592,6 +621,9 @@ for entry_dir in "${entry_dirs[@]}"; do
   {
     echo "entry=$entry_name"
     echo "entry_directory=$entry_dir"
+    echo "entry_manifest=${manifest_path:-not_used}"
+    echo "entry_format=${manifest_entry_format:-not_declared}"
+    echo "executable_format=${manifest_executable_format:-not_declared}"
     echo "archive_file=$archive_name"
     echo "archive_bytes=$archive_bytes"
     echo "archive_sha256=$archive_sha256"

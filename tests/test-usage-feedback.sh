@@ -90,4 +90,35 @@ grep -q 'formal enwik9 runs require --cold-cache' \
 grep -q '^  --cold-cache ' "$test_root/qualify-archive-cold-cache.stderr" \
   || fail "qualification usage did not describe --cold-cache"
 
+expect_usage_error qualify-archive-entry-path \
+  "$project_dir/qualify-archive.sh" \
+    --preflight-only \
+    --expected-size 1 \
+    --entry Entries/Wolk/cmix-neif-pre3/ \
+    --executable archive9 \
+    --output enwik9_decompressed \
+    "$project_dir/Entries/Example"
+grep -q -- '--entry requires a child name without slashes' \
+  "$test_root/qualify-archive-entry-path.stderr" \
+  || fail "qualification diagnostic did not distinguish a child name from a path"
+
+manifest_results="$test_root/manifest-results"
+bash "$project_dir/qualify-archive.sh" \
+  --preflight-only \
+  --results "$manifest_results" \
+  "$project_dir/Entries/Example" \
+  >"$test_root/manifest.stdout" 2>"$test_root/manifest.stderr" \
+  || fail "qualification did not accept the entry.env defaults"
+manifest_preflight="$(find "$manifest_results" -name preflight.env -type f -print -quit)"
+[[ -n "$manifest_preflight" ]] \
+  || fail "manifest-driven qualification did not write preflight evidence"
+grep -q '^archive_file=archive9$' "$manifest_preflight" \
+  || fail "qualification did not use entry.env ARCHIVE"
+grep -q '^expected_output=data9$' "$manifest_preflight" \
+  || fail "qualification did not use entry.env DECOMPRESSED_OUTPUT"
+grep -q '^qualification_os=ubuntu-22.04$' "$manifest_preflight" \
+  || fail "qualification did not use entry.env QUALIFICATION_OS"
+grep -q '^entry_format=self-extracting$' "$manifest_preflight" \
+  || fail "qualification did not record entry.env ENTRY_FORMAT"
+
 echo "usage feedback tests passed"
