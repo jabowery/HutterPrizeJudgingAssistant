@@ -155,6 +155,11 @@ require_materialized_assets() {
       exit 2
     fi
 
+    [[ -e "$script_dir/.git" ]] \
+      || die "required files are Git LFS pointers, but this is not a Git clone;" \
+        "clone https://github.com/jabowery/HutterPrizeJudgingAssistant.git" \
+        "or use a self-contained archive with the complete LFS objects"
+
     ensure_git_lfs
     include="$(IFS=,; echo "${includes[*]}")"
     echo "Materializing required Git LFS objects..." >&2

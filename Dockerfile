@@ -57,7 +57,8 @@ RUN chmod 0555 \
       /opt/geekbench/Geekbench-5.5.1-Linux/geekbench5 \
       /opt/geekbench/Geekbench-5.5.1-Linux/geekbench_x86_64 \
     && groupadd --gid 65532 contestant \
-    && useradd --no-create-home --home-dir /nonexistent \
+    && useradd --key UID_MAX=65532 \
+         --no-create-home --home-dir /nonexistent \
          --no-user-group --gid 65532 --uid 65532 contestant \
     && mkdir -p /reference /submission /work \
     && chmod 0555 /reference /submission \

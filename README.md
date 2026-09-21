@@ -25,6 +25,51 @@ worker, Geekbench calibration, dependency installation, compilation,
 compression, and decompression. Entrant-controlled registry references are not
 accepted.
 
+## Obtain the repository
+
+Use a Git clone so the judging system can materialize its required Git LFS
+objects automatically:
+
+```bash
+git clone https://github.com/jabowery/HutterPrizeJudgingAssistant.git
+cd HutterPrizeJudgingAssistant
+```
+
+An independently distributed tar or zip archive is usable only if it already
+contains the complete bytes of every Git LFS object. GitHub-generated source
+archives may instead contain small LFS pointer records and have no `.git`
+metadata from which the judging system can fetch their contents. Do not begin a
+formal run from such a pointer-only archive.
+
+## Host requirements
+
+A formal run requires:
+
+- an x86-64 Linux Docker host with at least 16 GiB RAM;
+- a local Docker Engine daemon reached through a Unix socket (Docker Compose is
+  not used);
+- a maintained Linux kernel providing seccomp, `no_new_privs`, Landlock ABI 3
+  or newer, and an enforcing AppArmor or SELinux container profile;
+- `git` for the recommended clone, plus `bash`, `sudo`, `curl`, GNU coreutils,
+  `findutils`, `awk`, `sed`, and `util-linux` (including `flock`); ordinary
+  Ubuntu installations provide all but some optional packages by default;
+- permission to use `sudo` for Docker access when necessary and for the narrow
+  cold-cache helper, which must be able to write `/proc/sys/vm/drop_caches`;
+- a writable work filesystem with at least 100 GB free, in addition to space
+  used by Docker images, the repository, input files, and retained results;
+- the exact 1,000,000,000-byte `enwik9` reference and a complete entry
+  directory; and
+- temporary outbound Internet access for cloning/LFS materialization, base
+  image and dependency installation, and automatic Geekbench 5 calibration.
+
+The judging system installs `git-lfs` through its separate trusted host helper
+when a clone contains unresolved pointers. It does not install Docker Engine or
+`git`. Entrant build dependencies are installed inside the declared
+qualification image, not on the host. The security preflight verifies the
+Docker and kernel confinement conditions before any entrant-provided code is
+unpacked or executed. Rootless Docker or user-namespace remapping adds an
+identity boundary but is currently advisory rather than mandatory.
+
 ## Run
 
 From the repository root:
@@ -52,12 +97,13 @@ than running it under an unscored compatibility layer.
 
 ## Automatic host initialization
 
-Invoke `judging_assistance.sh` as an ordinary user. When necessary, it installs
-Git LFS through the separate `install-host-dependencies.sh` helper, materializes
-the required repository objects, and re-executes the trusted host orchestrator
-through `sudo` to access Docker. The customary password prompt is the only
-required interaction. Results created by the elevated process are returned to
-the invoking user's ownership.
+Invoke `judging_assistance.sh` as an ordinary user. In a Git clone, when
+necessary, it installs Git LFS through the separate
+`install-host-dependencies.sh` helper, materializes the required repository
+objects, and re-executes the trusted host orchestrator through `sudo` to access
+Docker. The customary password prompt is the only required interaction.
+Results created by the elevated process are returned to the invoking user's
+ownership.
 
 The qualification-only `benchmark.sh` and `qualify-archive.sh` wrappers use
 the same Docker-access behavior: invoke them as an ordinary user and they
