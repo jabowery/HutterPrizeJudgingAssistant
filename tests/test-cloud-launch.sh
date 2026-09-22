@@ -44,6 +44,13 @@ case "$*" in
     fi
     exit 0
     ;;
+  *"compute ssh"*)
+    if [[ ! -e "$GCLOUD_SSH_STATE" ]]; then
+      : > "$GCLOUD_SSH_STATE"
+      exit 255
+    fi
+    exit 0
+    ;;
   *)
     echo "unexpected fake gcloud invocation: $*" >&2
     exit 90
@@ -54,6 +61,7 @@ chmod 0500 -- "$fake_bin/gcloud"
 
 export GCLOUD_TEST_LOG="$test_root/gcloud.log"
 export GCLOUD_SCP_STATE="$test_root/scp-state"
+export GCLOUD_SSH_STATE="$test_root/ssh-state"
 selected_zone="$(
   PATH="$fake_bin:$PATH" "$project_dir/provision-gcp-instance.sh" \
     --project example-project \
@@ -105,6 +113,19 @@ grep -q 'attempt 1/5 failed' "$test_root/scp.stderr" \
 grep -q '^5$' "$SLEEP_TEST_LOG" \
   || fail "cloud upload retry did not back off"
 
+: > "$SLEEP_TEST_LOG"
+PATH="$fake_bin:$PATH" hp_gcloud_ssh_with_retry \
+  test-hutter-system example-project us-central1-b \
+  'sha256sum /tmp/upload' 'Verifying test upload' \
+  >"$test_root/ssh.stdout" 2>"$test_root/ssh.stderr" \
+  || fail "idempotent cloud SSH operation was not retried successfully"
+[[ "$(grep -c 'compute ssh' "$GCLOUD_TEST_LOG")" == 2 ]] \
+  || fail "cloud SSH operation did not stop after the successful retry"
+grep -q 'SSH attempt 1/5 failed' "$test_root/ssh.stderr" \
+  || fail "cloud SSH retry was not reported"
+grep -q '^5$' "$SLEEP_TEST_LOG" \
+  || fail "cloud SSH retry did not back off"
+
 make_entry() {
   local entry_dir="$1"
   mkdir -p -- "$entry_dir"
@@ -130,6 +151,7 @@ make_entry "$source_entry"
 source_plan="$test_root/source-plan"
 "$project_dir/launch-cloud-judging.sh" --dry-run \
   --machine-type n4d-highmem-2 --tmux-history-lines 100000 \
+  --reuse-instance \
   "$source_entry" "$reference" > "$source_plan"
 grep -q '^machine_type=n4d-highmem-2$' "$source_plan" \
   || fail "launcher did not retain its machine override"
@@ -137,6 +159,8 @@ grep -q '^archive_present=no$' "$source_plan" \
   || fail "launcher did not detect an absent archive"
 grep -q '^execution_mode=source_only$' "$source_plan" \
   || fail "launcher did not select source-only execution"
+grep -q '^reuse_instance=true$' "$source_plan" \
+  || fail "launcher did not retain its resume selection"
 grep -q '^judging_command=.*--source-only' "$source_plan" \
   || fail "source-only command did not include --source-only"
 grep -q '^judging_command=.*\.\./HutterPrizeSubmissions/SourceOnly' \

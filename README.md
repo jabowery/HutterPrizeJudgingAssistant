@@ -142,6 +142,22 @@ It deliberately retains the instance after completion or setup failure so
 evidence is not destroyed; cloud charges continue until the operator runs the
 printed deletion command.
 
+If setup is interrupted by a transient SSH failure after the trusted host
+bootstrap completed, resume that retained instance instead of provisioning a
+second one:
+
+```bash
+./launch-cloud-judging.sh \
+  --reuse-instance \
+  --project PROJECT \
+  --zone RETAINED_ZONE \
+  ../HutterPrizeSubmissions/NAME ./enwik9
+```
+
+The resume path verifies that the instance is running, has the expected
+purpose label, has no attached service account, and contains the trusted host
+tools. Idempotent SSH operations and uploads are retried automatically.
+
 The local gcloud credentials are used only by the local provisioning process
 and are not copied to the instance. Google Cloud otherwise attaches the
 project's default Compute Engine service account in many configurations, whose

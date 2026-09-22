@@ -30,3 +30,33 @@ hp_gcloud_scp_with_retry() {
     sleep "$((attempt * 5))"
   done
 }
+
+# Retry remote commands only when the caller has made the command idempotent.
+# An SSH reset does not prove that the remote command failed to execute, so a
+# retry must be safe after either partial or complete prior execution.
+hp_gcloud_ssh_with_retry() {
+  if (( $# != 5 )); then
+    echo "error: hp_gcloud_ssh_with_retry requires INSTANCE PROJECT ZONE COMMAND DESCRIPTION" >&2
+    return 2
+  fi
+
+  local instance="$1" project="$2" zone="$3" command="$4" description="$5"
+  local attempt status
+  local -r maximum_attempts=5
+
+  for ((attempt = 1; attempt <= maximum_attempts; attempt++)); do
+    if gcloud compute ssh "$instance" \
+        --project="$project" --zone="$zone" --quiet --command="$command"; then
+      return 0
+    else
+      status=$?
+    fi
+
+    if (( attempt == maximum_attempts )); then
+      echo "error: $description failed after $maximum_attempts SSH attempts" >&2
+      return "$status"
+    fi
+    echo "$description SSH attempt $attempt/$maximum_attempts failed; retrying after $((attempt * 5)) seconds..." >&2
+    sleep "$((attempt * 5))"
+  done
+}

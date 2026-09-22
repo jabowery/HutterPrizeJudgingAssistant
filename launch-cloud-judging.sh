@@ -26,6 +26,7 @@ tmux_session=hutter-judging
 tmux_history_lines=100000
 geekbench_score=""
 dry_run=false
+reuse_instance=false
 declare -a requested_zones=()
 declare -a positional=()
 transfer_dir=""
@@ -61,6 +62,7 @@ Cloud options:
   --subnet SUBNET            Optional VPC subnet
   --tags TAGS                Optional comma-separated network tags
   --labels LABELS            Default: purpose=hutter-prize-judging
+  --reuse-instance           Resume setup on a retained initialized instance
 
 Remote-run options:
   --repo-url URL             Judging-system Git repository
@@ -76,7 +78,9 @@ Remote-run options:
 The invoking environment supplies local gcloud credentials. They are not
 copied to the cloud host, and the new instance has no attached service account.
 The instance is intentionally retained after setup and execution; the launcher
-prints explicit attach, result-copy, and deletion commands.
+prints explicit attach, result-copy, and deletion commands. --reuse-instance
+accepts only a running instance with the expected purpose label, no attached
+service account, and the previously installed trusted host tools.
 EOF
 }
 
@@ -128,6 +132,7 @@ while (( $# > 0 )); do
     --subnet) (( $# >= 2 )) || usage_error "$1 requires a value"; subnet="$2"; shift 2 ;;
     --tags) (( $# >= 2 )) || usage_error "$1 requires a value"; tags="$2"; shift 2 ;;
     --labels) (( $# >= 2 )) || usage_error "$1 requires a value"; labels="$2"; shift 2 ;;
+    --reuse-instance) reuse_instance=true; shift ;;
     --repo-url) (( $# >= 2 )) || usage_error "$1 requires a value"; repo_url="$2"; shift 2 ;;
     --repo-ref) (( $# >= 2 )) || usage_error "$1 requires a value"; repo_ref="$2"; shift 2 ;;
     --remote-repo-name) (( $# >= 2 )) || usage_error "$1 requires a value"; remote_repo_name="$2"; shift 2 ;;
@@ -216,6 +221,7 @@ if [[ "$dry_run" == true ]]; then
   printf 'archive_present=%s\n' "$([[ "$source_only" == true ]] && echo no || echo yes)"
   printf 'execution_mode=%s\n' "$([[ "$source_only" == true ]] && echo source_only || echo full_submission)"
   printf 'tmux_history_lines=%s\n' "$tmux_history_lines"
+  printf 'reuse_instance=%s\n' "$reuse_instance"
   printf 'judging_command=%s\n' "$(shell_join "${judging_command[@]}")"
   exit 0
 fi
@@ -231,28 +237,89 @@ fi
   || die "no Google Cloud project is selected; use --project"
 readonly -a project_args=(--project="$project")
 
-provision_args=(
-  --name "$instance_name"
-  --project "$project"
-  --machine-type "$machine_type"
-  --region "$region"
-  --boot-disk-size "$boot_disk_size"
-  --boot-disk-type "$boot_disk_type"
-  --image-family "$image_family"
-  --image-project "$image_project"
-  --labels "$labels"
-)
-for zone in "${requested_zones[@]}"; do provision_args+=(--zone "$zone"); done
-[[ -z "$network" ]] || provision_args+=(--network "$network")
-[[ -z "$subnet" ]] || provision_args+=(--subnet "$subnet")
-[[ -z "$tags" ]] || provision_args+=(--tags "$tags")
-selected_zone="$("$script_dir/provision-gcp-instance.sh" "${provision_args[@]}")" \
-  || die "cloud instance provisioning failed"
+if [[ "$reuse_instance" == true ]]; then
+  existing_zone_output="$(
+    gcloud compute instances list "${project_args[@]}" \
+      --filter="name=$instance_name" --format='value(zone)'
+  )" || die "could not locate retained instance $instance_name"
+  mapfile -t existing_zones < <(
+    printf '%s\n' "$existing_zone_output" | sed '/^$/d'
+  )
+  (( ${#existing_zones[@]} == 1 )) \
+    || die "--reuse-instance requires exactly one existing instance named $instance_name"
+  selected_zone="${existing_zones[0]##*/}"
+  if (( ${#requested_zones[@]} > 0 )); then
+    zone_matches=false
+    for zone in "${requested_zones[@]}"; do
+      [[ "$zone" != "$selected_zone" ]] || zone_matches=true
+    done
+    [[ "$zone_matches" == true ]] \
+      || die "existing instance is in $selected_zone, not a requested --zone"
+  fi
+  instance_status="$(gcloud compute instances describe "$instance_name" \
+    "${project_args[@]}" --zone="$selected_zone" --format='value(status)')" \
+    || die "could not verify retained instance status"
+  [[ "$instance_status" == RUNNING ]] \
+    || die "retained instance is $instance_status, not RUNNING"
+  service_accounts="$(gcloud compute instances describe "$instance_name" \
+    "${project_args[@]}" --zone="$selected_zone" \
+    --format='value(serviceAccounts.email)')" \
+    || die "could not verify retained instance identity configuration"
+  [[ -z "$service_accounts" ]] \
+    || die "retained instance has an attached service account; refusing reuse"
+  purpose_label="$(gcloud compute instances describe "$instance_name" \
+    "${project_args[@]}" --zone="$selected_zone" \
+    --format='value(labels.purpose)')" \
+    || die "could not verify retained instance purpose label"
+  [[ "$purpose_label" == hutter-prize-judging ]] \
+    || die "retained instance lacks purpose=hutter-prize-judging"
+  retained_machine_type="$(gcloud compute instances describe "$instance_name" \
+    "${project_args[@]}" --zone="$selected_zone" \
+    --format='value(machineType)')" \
+    || die "could not identify retained instance machine type"
+  machine_type="${retained_machine_type##*/}"
+  retained_memory_mb="$(gcloud compute machine-types describe "$machine_type" \
+    "${project_args[@]}" --zone="$selected_zone" --format='value(memoryMb)')" \
+    || die "could not verify retained instance memory"
+  [[ "$retained_memory_mb" =~ ^[0-9]+$ && "$retained_memory_mb" -ge 16384 ]] \
+    || die "retained instance provides ${retained_memory_mb:-unknown} MiB; at least 16384 MiB is required"
+  retained_disk_gb="$(gcloud compute instances describe "$instance_name" \
+    "${project_args[@]}" --zone="$selected_zone" \
+    --format='value(disks[0].diskSizeGb)')" \
+    || die "could not identify retained instance boot-disk size"
+  [[ "$retained_disk_gb" =~ ^[1-9][0-9]*$ ]] \
+    || die "retained instance boot-disk size is unavailable"
+  boot_disk_size="${retained_disk_gb}GB"
+  echo "Reusing retained instance $instance_name in $selected_zone." >&2
+else
+  provision_args=(
+    --name "$instance_name"
+    --project "$project"
+    --machine-type "$machine_type"
+    --region "$region"
+    --boot-disk-size "$boot_disk_size"
+    --boot-disk-type "$boot_disk_type"
+    --image-family "$image_family"
+    --image-project "$image_project"
+    --labels "$labels"
+  )
+  for zone in "${requested_zones[@]}"; do provision_args+=(--zone "$zone"); done
+  [[ -z "$network" ]] || provision_args+=(--network "$network")
+  [[ -z "$subnet" ]] || provision_args+=(--subnet "$subnet")
+  [[ -z "$tags" ]] || provision_args+=(--tags "$tags")
+  selected_zone="$("$script_dir/provision-gcp-instance.sh" "${provision_args[@]}")" \
+    || die "cloud instance provisioning failed"
+fi
 created_instance=true
 
-ssh_remote() {
+ssh_remote_once() {
   gcloud compute ssh "$instance_name" "${project_args[@]}" \
     --zone="$selected_zone" --quiet --command="$1"
+}
+
+ssh_remote() {
+  hp_gcloud_ssh_with_retry \
+    "$instance_name" "$project" "$selected_zone" "$1" "${2:-Remote command}"
 }
 
 scp_remote() {
@@ -263,7 +330,7 @@ scp_remote() {
 wait_for_ssh() {
   local attempt
   for ((attempt = 1; attempt <= 90; attempt++)); do
-    if ssh_remote true >/dev/null 2>&1; then
+    if ssh_remote_once true >/dev/null 2>&1; then
       return 0
     fi
     (( attempt % 6 != 0 )) \
@@ -275,32 +342,48 @@ wait_for_ssh() {
 
 echo "Waiting for the new instance to accept SSH..." >&2
 wait_for_ssh || die "instance did not become reachable through gcloud compute ssh"
-remote_home="$(ssh_remote 'printf "%s\n" "$HOME"' | tail -n 1)"
+remote_home="$(ssh_remote 'printf "%s\n" "$HOME"' \
+  'Reading the retained user home' | tail -n 1)"
 [[ "$remote_home" == /* && "$remote_home" != / && "$remote_home" != *$'\n'* ]] \
   || die "could not determine a safe remote home directory"
 remote_repo="$remote_home/$remote_repo_name"
 
 stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-remote_bootstrap="/tmp/hutter-prize-bootstrap-$stamp.sh"
-echo "Uploading and running the trusted Ubuntu bootstrap..." >&2
-scp_remote "$script_dir/cloud/bootstrap-ubuntu.sh" "$remote_bootstrap"
-bootstrap_command="$(shell_join sudo bash "$remote_bootstrap" \
-  --work-root "$remote_work_root") && $(shell_join rm -f "$remote_bootstrap")"
-ssh_remote "$bootstrap_command"
+if [[ "$reuse_instance" == true ]]; then
+  initialized_command="$(shell_join command -v docker git git-lfs tmux tar sha256sum) >/dev/null"
+  initialized_command+=" && $(shell_join test -d "$remote_work_root")"
+  ssh_remote "$initialized_command" 'Validating retained host initialization' \
+    >/dev/null \
+    || die "retained instance is not fully initialized; delete it and launch a new instance"
+else
+  remote_bootstrap="/tmp/hutter-prize-bootstrap-$stamp.sh"
+  echo "Uploading and running the trusted Ubuntu bootstrap..." >&2
+  scp_remote "$script_dir/cloud/bootstrap-ubuntu.sh" "$remote_bootstrap"
+  bootstrap_command="$(shell_join sudo bash "$remote_bootstrap" \
+    --work-root "$remote_work_root") && $(shell_join rm -f "$remote_bootstrap")"
+  # Do not retry a long package operation whose remote completion state is
+  # unknowable after transport loss. A retained host can be explicitly resumed.
+  ssh_remote_once "$bootstrap_command"
 
-echo "Rebooting into the fully updated host kernel..." >&2
-ssh_remote 'sudo reboot' >/dev/null 2>&1 || true
-sleep 10
-wait_for_ssh || die "instance did not return after its security-update reboot"
+  echo "Rebooting into the fully updated host kernel..." >&2
+  ssh_remote_once 'sudo reboot' >/dev/null 2>&1 || true
+  sleep 10
+  wait_for_ssh || die "instance did not return after its security-update reboot"
+fi
 
-echo "Cloning the judging system at $repo_ref..." >&2
+echo "Preparing the judging system at $repo_ref..." >&2
 clone_command="$(shell_join env GIT_LFS_SKIP_SMUDGE=1 git clone "$repo_url" "$remote_repo")"
-ssh_remote "$clone_command"
 fetch_command="$(shell_join git -C "$remote_repo" fetch --depth=1 origin "$repo_ref")"
 checkout_command="$(shell_join git -C "$remote_repo" checkout --detach FETCH_HEAD)"
 lfs_command="$(shell_join git -C "$remote_repo" lfs install --local --skip-smudge)"
-ssh_remote "$fetch_command && $checkout_command && $lfs_command"
-remote_commit="$(ssh_remote "$(shell_join git -C "$remote_repo" rev-parse HEAD)" | tail -n 1)"
+repo_git_dir="$remote_repo/.git"
+prepare_repo_command="if $(shell_join test -e "$remote_repo") && ! $(shell_join test -d "$repo_git_dir"); then"
+prepare_repo_command+=" echo 'error: remote repository path exists but is not a Git work tree' >&2; exit 80; fi;"
+prepare_repo_command+=" if ! $(shell_join test -d "$repo_git_dir"); then $clone_command; fi;"
+prepare_repo_command+=" $fetch_command && $checkout_command && $lfs_command"
+ssh_remote "$prepare_repo_command" 'Preparing the remote judging repository'
+remote_commit="$(ssh_remote "$(shell_join git -C "$remote_repo" rev-parse HEAD)" \
+  'Verifying the remote judging revision' | tail -n 1)"
 [[ "$remote_commit" =~ ^[0-9a-f]{40,64}$ ]] \
   || die "could not verify the remote judging-system commit"
 
@@ -311,6 +394,7 @@ tmux_runner_sha256="$(
 echo "Uploading and verifying the trusted tmux runner..." >&2
 scp_remote "$script_dir/scripts/run-in-tmux.sh" "$remote_tmux_runner"
 remote_sha256="$(ssh_remote "$(shell_join sha256sum "$remote_tmux_runner")" \
+  'Verifying the trusted tmux runner' \
   | awk 'END {print $1}')"
 [[ "$remote_sha256" == "$tmux_runner_sha256" ]] \
   || die "trusted tmux runner SHA-256 mismatch"
@@ -326,6 +410,7 @@ remote_enwik9_upload="$remote_home/enwik9-$stamp.upload"
 echo "Uploading and verifying the entry transport archive..." >&2
 scp_remote "$entry_transport" "$remote_entry_transport"
 remote_sha256="$(ssh_remote "$(shell_join sha256sum "$remote_entry_transport")" \
+  'Verifying the entry transport archive' \
   | awk 'END {print $1}')"
 [[ "$remote_sha256" == "$entry_transport_sha256" ]] \
   || die "entry transport SHA-256 mismatch"
@@ -333,21 +418,30 @@ remote_sha256="$(ssh_remote "$(shell_join sha256sum "$remote_entry_transport")" 
 remote_stage="$remote_home/entry-stage-$stamp"
 remote_submissions="$remote_home/HutterPrizeSubmissions"
 remote_entry="$remote_submissions/$entry_name"
-extract_command="$(shell_join mkdir -p "$remote_stage" "$remote_submissions")"
+extract_command="$(shell_join rm -rf "$remote_stage")"
+extract_command+=" && $(shell_join mkdir -p "$remote_stage" "$remote_submissions")"
 extract_command+=" && $(shell_join tar -xzf "$remote_entry_transport" -C "$remote_stage")"
 extract_command+=" && $(shell_join test -d "$remote_stage/$entry_name")"
 extract_command+=" && $(shell_join rm -rf "$remote_entry")"
 extract_command+=" && $(shell_join mv "$remote_stage/$entry_name" "$remote_entry")"
-extract_command+=" && $(shell_join rm -f "$remote_entry_transport")"
 extract_command+=" && $(shell_join rmdir "$remote_stage")"
-ssh_remote "$extract_command"
+ssh_remote "$extract_command" 'Extracting the entry transport archive'
+ssh_remote "$(shell_join rm -f "$remote_entry_transport")" \
+  'Removing the verified entry transport archive'
 
 echo "Uploading and verifying enwik9..." >&2
 scp_remote "$enwik9_path" "$remote_enwik9_upload"
 remote_sha256="$(ssh_remote "$(shell_join sha256sum "$remote_enwik9_upload")" \
+  'Verifying enwik9' \
   | awk 'END {print $1}')"
 [[ "$remote_sha256" == "$enwik9_sha256" ]] || die "enwik9 SHA-256 mismatch"
-ssh_remote "$(shell_join mv "$remote_enwik9_upload" "$remote_repo/enwik9")"
+remote_enwik9_stage="$remote_repo/.enwik9-$stamp"
+stage_enwik9_command="$(shell_join rm -f "$remote_enwik9_stage")"
+stage_enwik9_command+=" && $(shell_join ln "$remote_enwik9_upload" "$remote_enwik9_stage")"
+stage_enwik9_command+=" && $(shell_join mv -f "$remote_enwik9_stage" "$remote_repo/enwik9")"
+ssh_remote "$stage_enwik9_command" 'Staging verified enwik9'
+ssh_remote "$(shell_join rm -f "$remote_enwik9_upload")" \
+  'Removing the verified enwik9 upload'
 
 remote_log="$remote_repo/Results/cloud-$stamp-$entry_name.log"
 tmux_command=(
@@ -359,7 +453,14 @@ tmux_command=(
   -- "${judging_command[@]}"
 )
 echo "Starting the judging workflow in tmux ($tmux_session)..." >&2
-ssh_remote "$(shell_join "${tmux_command[@]}")"
+if ssh_remote_once "$(shell_join "${tmux_command[@]}")"; then
+  :
+elif ssh_remote "$(shell_join tmux has-session -t "$tmux_session")" \
+    'Confirming the tmux session after transport loss' >/dev/null 2>&1; then
+  echo "The tmux session exists; treating the disconnected start request as successful." >&2
+else
+  die "could not start or confirm tmux session $tmux_session"
+fi
 
 mkdir -p -- "$script_dir/Results"
 launch_record="$script_dir/Results/cloud-launch-$stamp-$entry_name.env"
