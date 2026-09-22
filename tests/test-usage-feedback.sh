@@ -57,6 +57,7 @@ readonly -a scripts=(
   cold-cache-host-helper.sh
   provision-gcp-instance.sh
   launch-cloud-judging.sh
+  cloud/fetch-enwik9.sh
   scripts/run-in-tmux.sh
 )
 
@@ -82,6 +83,8 @@ expect_usage_error cold-cache-helper-missing \
   "$project_dir/cold-cache-host-helper.sh"
 expect_usage_error cloud-launch-missing \
   "$project_dir/launch-cloud-judging.sh"
+expect_usage_error cloud-launch-upload-missing \
+  "$project_dir/launch-cloud-judging.sh" --upload-enwik9
 expect_usage_error tmux-runner-missing \
   "$project_dir/scripts/run-in-tmux.sh"
 expect_usage_error benchmark-invalid-qualification-os \

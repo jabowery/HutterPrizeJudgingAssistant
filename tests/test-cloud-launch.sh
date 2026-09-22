@@ -144,15 +144,13 @@ DECOMPRESSED_OUTPUT=enwik9_uncompressed
 EOF
 }
 
-reference="$test_root/enwik9"
-truncate --size=1000000000 "$reference"
 source_entry="$test_root/SourceOnly"
 make_entry "$source_entry"
 source_plan="$test_root/source-plan"
 "$project_dir/launch-cloud-judging.sh" --dry-run \
   --machine-type n4d-highmem-2 --tmux-history-lines 100000 \
   --reuse-instance \
-  "$source_entry" "$reference" > "$source_plan"
+  "$source_entry" > "$source_plan"
 grep -q '^machine_type=n4d-highmem-2$' "$source_plan" \
   || fail "launcher did not retain its machine override"
 grep -q '^archive_present=no$' "$source_plan" \
@@ -161,6 +159,8 @@ grep -q '^execution_mode=source_only$' "$source_plan" \
   || fail "launcher did not select source-only execution"
 grep -q '^reuse_instance=true$' "$source_plan" \
   || fail "launcher did not retain its resume selection"
+grep -q '^enwik9_transport=official-download$' "$source_plan" \
+  || fail "launcher did not default to cloud-side enwik9 download"
 grep -q '^judging_command=.*--source-only' "$source_plan" \
   || fail "source-only command did not include --source-only"
 grep -q '^judging_command=.*\.\./HutterPrizeSubmissions/SourceOnly' \
@@ -172,7 +172,7 @@ make_entry "$full_entry"
 printf 'archive\n' > "$full_entry/archive9"
 full_plan="$test_root/full-plan"
 "$project_dir/launch-cloud-judging.sh" --dry-run \
-  "$full_entry" "$reference" > "$full_plan"
+  "$full_entry" > "$full_plan"
 grep -q '^archive_present=yes$' "$full_plan" \
   || fail "launcher did not detect a submitted archive"
 grep -q '^execution_mode=full_submission$' "$full_plan" \
@@ -183,6 +183,21 @@ fi
 grep -q '^judging_command=.*\.\./HutterPrizeSubmissions/FullSubmission' \
   "$full_plan" \
   || fail "full cloud run did not use the external submission directory"
+
+grep -q '^readonly enwik9_zip_bytes=322592222$' \
+  "$project_dir/cloud/fetch-enwik9.sh" \
+  || fail "cloud fetcher does not pin the official ZIP size"
+grep -q '^readonly enwik9_bytes=1000000000$' \
+  "$project_dir/cloud/fetch-enwik9.sh" \
+  || fail "cloud fetcher does not pin the canonical extracted size"
+grep -q '^readonly enwik9_md5=e206c3450ac99950df65bf70ef61a12d$' \
+  "$project_dir/cloud/fetch-enwik9.sh" \
+  || fail "cloud fetcher does not pin the canonical MD5"
+grep -q '^readonly enwik9_sha256=159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc$' \
+  "$project_dir/cloud/fetch-enwik9.sh" \
+  || fail "cloud fetcher does not pin the repository's canonical SHA-256"
+grep -q 'unzip util-linux' "$project_dir/cloud/bootstrap-ubuntu.sh" \
+  || fail "cloud bootstrap does not install the ZIP extractor"
 
 cat > "$fake_bin/tmux" <<'EOF'
 #!/usr/bin/env bash

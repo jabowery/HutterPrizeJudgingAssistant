@@ -111,7 +111,7 @@ credentials already selected in the invoking environment:
 
 ```bash
 ./launch-cloud-judging.sh \
-  --tags wg-node ../HutterPrizeSubmissions/NAME ./enwik9
+  --tags wg-node ../HutterPrizeSubmissions/NAME
 ```
 
 The launcher performs the following trusted operations before entrant code is
@@ -122,9 +122,12 @@ handled:
    RAM, no attached service account, and no OAuth scopes.
 3. Applies Ubuntu updates, reboots into the updated kernel, and installs Docker,
    Git LFS, tmux, and the ordinary host utilities.
-4. Clones and records the selected judging-system revision, transfers the entry
-   and `enwik9`, and verifies the transfers by SHA-256. Transient SSH upload
-   failures are retried automatically.
+4. Clones and records the selected judging-system revision and transfers the
+   entry. The cloud host downloads the official 322,592,222-byte `enwik9.zip`
+   directly from [Matt Mahoney's test-data site](https://www.mattmahoney.net/dc/textdata.html),
+   then accepts the extracted file only after its canonical size, MD5, and
+   SHA-256 have been verified. Transient SSH operations are retried
+   automatically.
 5. Configures tmux for 100000 lines of scrollback and starts the run in a
    detached session whose output is also written to a log.
 
@@ -151,12 +154,25 @@ second one:
   --reuse-instance \
   --project PROJECT \
   --zone RETAINED_ZONE \
-  ../HutterPrizeSubmissions/NAME ./enwik9
+  ../HutterPrizeSubmissions/NAME
 ```
 
 The resume path verifies that the instance is running, has the expected
 purpose label, has no attached service account, and contains the trusted host
 tools. Idempotent SSH operations and uploads are retried automatically.
+
+The normal path does not upload the one-billion-byte local `enwik9`. If the
+cloud host cannot reach the official download site, explicitly select the
+slower local-upload fallback:
+
+```bash
+./launch-cloud-judging.sh \
+  --upload-enwik9 ./enwik9 \
+  ../HutterPrizeSubmissions/NAME
+```
+
+The launcher verifies the local file against the same canonical size and
+digests before uploading it.
 
 The local gcloud credentials are used only by the local provisioning process
 and are not copied to the instance. Google Cloud otherwise attaches the
@@ -175,7 +191,7 @@ All cloud and tmux defaults can be overridden explicitly. For example:
   --machine-type n4d-highmem-2 \
   --zone us-central1-b \
   --boot-disk-size 240GB \
-  ../HutterPrizeSubmissions/NAME ./enwik9
+  ../HutterPrizeSubmissions/NAME
 ```
 
 To provision only the instance and print its selected zone, use the lower-level
