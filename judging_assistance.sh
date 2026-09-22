@@ -8,6 +8,7 @@ source "$script_dir/lib/dependency-image.sh"
 source "$script_dir/lib/prize-limits.sh"
 source "$script_dir/lib/resource-units.sh"
 source "$script_dir/lib/cold-cache.sh"
+source "$script_dir/lib/host-dependencies.sh"
 image=""
 entry_dir=""
 reference_path="$script_dir/enwik9"
@@ -18,11 +19,13 @@ memory_limit_bytes="$HP_PEAK_RSS_LIMIT_BYTES"
 disk_limit_bytes=100000000000
 disk_poll_seconds=10
 cpu_limit=1
-runtime_exec_policy=strict
+runtime_exec_policy=process-tree
 job_slots=2
+job_slots_explicit=false
 record_size=110793128
 expected_size=1000000000
 cold_cache=false
+source_only=false
 cold_cache_helper=""
 active_stage_root=""
 qualification_pid=""
@@ -49,7 +52,7 @@ Complete standardized technical judging:
      when the evaluated artifacts are not byte-identical to those qualified.
 
 Options:
-  --work-root DIR            Required filesystem with at least 100 GB free
+  --work-root DIR            Override automatic ./Work storage selection
   --geekbench-score N        Reuse a score instead of calibrating
   --results DIR              Default: ./Results
   --image NAME               Override the catalog-derived local image tag
@@ -57,10 +60,11 @@ Options:
   --disk-limit-bytes N       Default: 100 GB
   --disk-poll-seconds N      Default: 10
   --cpus N                   Default: 1
-  --runtime-exec-policy P    strict or process-tree (default: strict)
-  --jobs N                   Concurrent long-running phases: 1 or 2 (default: 2)
+  --runtime-exec-policy P    process-tree (default) or strict diagnostic mode
+  --jobs N                   Diagnostic concurrency: 1 or 2 (default: 2)
   --serial                   Alias for --jobs 1, for disputed CPU timings
-  --cold-cache               Required for a formal enwik9 run; requires --serial
+  --cold-cache               Enable cache control for a diagnostic run
+  --source-only              Build, compress, and qualify only the generated archive
   --record-size N            Default: 110793128
   --expected-size N          Expected corpus bytes (default: 1000000000)
   -h, --help                 Show this help
@@ -121,11 +125,13 @@ require_materialized_assets() {
     "$script_dir/Geekbench-5.5.1-Linux.tar.gz"
     "$script_dir/UPX-5.1.1-amd64_linux.tar.xz"
     "$submission_entry_dir/$HP_SOURCE_PACKAGE"
-    "$submission_entry_dir/$HP_ARCHIVE"
   )
   local -a pointers=() includes=()
-  if [[ "$HP_ENTRY_FORMAT" == separate-decompressor ]]; then
-    assets+=("$submission_entry_dir/$HP_DECOMPRESSOR")
+  if [[ "$source_only" != true ]]; then
+    assets+=("$submission_entry_dir/$HP_ARCHIVE")
+    if [[ "$HP_ENTRY_FORMAT" == separate-decompressor ]]; then
+      assets+=("$submission_entry_dir/$HP_DECOMPRESSOR")
+    fi
   fi
 
   for asset in "${assets[@]}"; do
@@ -272,9 +278,10 @@ while (( $# > 0 )); do
     --disk-poll-seconds) (( $# >= 2 )) || usage_error "$1 requires a value"; disk_poll_seconds="$2"; shift 2 ;;
     --cpus) (( $# >= 2 )) || usage_error "$1 requires a value"; cpu_limit="$2"; shift 2 ;;
     --runtime-exec-policy) (( $# >= 2 )) || usage_error "$1 requires a value"; runtime_exec_policy="$2"; shift 2 ;;
-    --jobs) (( $# >= 2 )) || usage_error "$1 requires a value"; job_slots="$2"; shift 2 ;;
-    --serial) job_slots=1; shift ;;
+    --jobs) (( $# >= 2 )) || usage_error "$1 requires a value"; job_slots="$2"; job_slots_explicit=true; shift 2 ;;
+    --serial) job_slots=1; job_slots_explicit=true; shift ;;
     --cold-cache) cold_cache=true; shift ;;
+    --source-only) source_only=true; shift ;;
     --record-size) (( $# >= 2 )) || usage_error "$1 requires a value"; record_size="$2"; shift 2 ;;
     --expected-size) (( $# >= 2 )) || usage_error "$1 requires a value"; expected_size="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -296,11 +303,20 @@ done
   || usage_error "cpus must be positive"
 [[ "$job_slots" == 1 || "$job_slots" == 2 ]] \
   || usage_error "jobs must be 1 or 2"
-if [[ "$expected_size" == 1000000000 && "$cold_cache" != true ]]; then
-  usage_error "formal enwik9 runs require --cold-cache"
+if [[ "$expected_size" == 1000000000 ]]; then
+  cold_cache=true
+  if [[ "$job_slots_explicit" != true ]]; then
+    job_slots=1
+  fi
+fi
+if [[ "$source_only" == true ]]; then
+  if [[ "$job_slots_explicit" == true && "$job_slots" != 1 ]]; then
+    usage_error "--source-only has no submitted qualification to run in parallel; omit --jobs 2"
+  fi
+  job_slots=1
 fi
 if [[ "$cold_cache" == true && "$job_slots" != 1 ]]; then
-  usage_error "--cold-cache refuses parallel execution; also specify --serial or --jobs 1"
+  usage_error "formal cache control requires serial execution; omit --jobs 2 or specify --serial"
 fi
 case "$runtime_exec_policy" in
   strict|process-tree) ;;
@@ -310,7 +326,9 @@ esac
   || usage_error "invalid Geekbench score"
 [[ -d "$entry_dir" && ! -L "$entry_dir" ]] || die "invalid entry directory: $entry_dir"
 [[ -f "$reference_path" && ! -L "$reference_path" ]] || die "invalid enwik9"
-[[ -n "$work_root" ]] || usage_error "--work-root is required"
+hp_host_dependencies_ensure "$script_dir" || exit 2
+work_root="${work_root:-$script_dir/Work}"
+mkdir -p -- "$work_root" || die "could not create work root: $work_root"
 [[ -d "$work_root" && ! -L "$work_root" && -w "$work_root" ]] \
   || die "invalid or unwritable work root: $work_root"
 entry_dir="$(realpath -- "$entry_dir")"
@@ -326,10 +344,13 @@ fi
 
 hp_manifest_load "$submission_entry_dir/entry.env" || exit 2
 hp_manifest_require_linux || exit 2
-[[ -f "$submission_entry_dir/$HP_ARCHIVE" \
-    && ! -L "$submission_entry_dir/$HP_ARCHIVE" ]] \
-  || die "entry is missing declared ARCHIVE $HP_ARCHIVE"
-if [[ "$HP_ENTRY_FORMAT" == separate-decompressor ]]; then
+if [[ "$source_only" != true ]]; then
+  [[ -f "$submission_entry_dir/$HP_ARCHIVE" \
+      && ! -L "$submission_entry_dir/$HP_ARCHIVE" ]] \
+    || die "entry is missing declared ARCHIVE $HP_ARCHIVE"
+fi
+if [[ "$source_only" != true \
+    && "$HP_ENTRY_FORMAT" == separate-decompressor ]]; then
   [[ -f "$submission_entry_dir/$HP_DECOMPRESSOR" \
       && ! -L "$submission_entry_dir/$HP_DECOMPRESSOR" ]] \
     || die "entry is missing declared submitted DECOMPRESSOR $HP_DECOMPRESSOR"
@@ -388,8 +409,13 @@ fi
 
 active_stage_root="$(mktemp -d -- "$work_root/hutter-package-$stamp.XXXXXX")"
 prepared_entry="$active_stage_root/$entry_name"
+prepare_options=()
+if [[ "$source_only" == true ]]; then
+  prepare_options+=(--source-only)
+fi
 if ! "$script_dir/prepare-entry.sh" \
     --skip-build --image "$image" \
+    "${prepare_options[@]}" \
     --results "$run_results/submission-package" \
     --output "$prepared_entry" "$submission_entry_dir" >/dev/null; then
   stage_fail submission_package "source package preparation failed"
@@ -440,52 +466,58 @@ if [[ "$cold_cache" == true ]]; then
 fi
 
 mkdir -p -- "$run_results/execution/submitted" "$run_results/execution/rebuilt"
-if [[ "$HP_ENTRY_FORMAT" == self-extracting ]]; then
-  submitted_execution_dir="$run_results/execution/submitted"
-  if ! "$script_dir/validate-executable.sh" \
-      --image "$image" --format "$HP_ARCHIVE_FORMAT" \
-      --results "$run_results/validation/submitted-archive" \
-      --output "$submitted_execution_dir/$HP_ARCHIVE" \
-      "$submission_entry_dir/$HP_ARCHIVE" >/dev/null; then
-    stage_fail submitted_validation "declared ARCHIVE could not be validated"
-  fi
-else
-  submitted_execution_dir="$run_results/execution/submitted"
-  if ! "$script_dir/validate-executable.sh" \
-      --image "$image" --format "$HP_DECOMPRESSOR_FORMAT" \
-      --results "$run_results/validation/submitted-decompressor" \
-      --output "$submitted_execution_dir/$HP_DECOMPRESSOR" \
-      "$submission_entry_dir/$HP_DECOMPRESSOR" >/dev/null; then
-    stage_fail submitted_validation "declared DECOMPRESSOR could not be validated"
-  fi
-fi
-
-qualification_command=("$script_dir/qualify-archive.sh" --skip-build
-  --container-id-file "$qualification_container_file"
-  --results "$run_results/submitted-decompression"
-  --output "$decompressed_output" "${common_limits[@]}")
-if [[ "$HP_ENTRY_FORMAT" == self-extracting ]]; then
-  qualification_command+=(--executable "$HP_ARCHIVE")
-else
-  qualification_command+=(
-    --executable "$HP_DECOMPRESSOR"
-    --arguments-file "$entry_dir/$HP_DECOMPRESSOR_ARGUMENTS"
-    --payload-file "$submission_entry_dir/$HP_ARCHIVE"
-    --payload-name "$HP_ARCHIVE"
-  )
-fi
-qualification_command+=("$submitted_execution_dir" "$reference_path")
-
-if (( job_slots == 2 )); then
-  execution_mode=parallel
-  echo "[$entry_name] starting submitted decompression qualification in parallel" >&2
-  "${qualification_command[@]}" &
-  qualification_pid=$!
-else
+submitted_qualification=skipped_source_only
+if [[ "$source_only" == true ]]; then
   execution_mode=serial
-  echo "[$entry_name] validating submitted decompression in serial mode" >&2
-  if ! "${qualification_command[@]}"; then
-    stage_fail submitted_decompression "submitted artifacts did not reproduce enwik9"
+  echo "[$entry_name] source-only mode: submitted decompression qualification skipped" >&2
+else
+  submitted_execution_dir="$run_results/execution/submitted"
+  if [[ "$HP_ENTRY_FORMAT" == self-extracting ]]; then
+    if ! "$script_dir/validate-executable.sh" \
+        --image "$image" --format "$HP_ARCHIVE_FORMAT" \
+        --results "$run_results/validation/submitted-archive" \
+        --output "$submitted_execution_dir/$HP_ARCHIVE" \
+        "$submission_entry_dir/$HP_ARCHIVE" >/dev/null; then
+      stage_fail submitted_validation "declared ARCHIVE could not be validated"
+    fi
+  else
+    if ! "$script_dir/validate-executable.sh" \
+        --image "$image" --format "$HP_DECOMPRESSOR_FORMAT" \
+        --results "$run_results/validation/submitted-decompressor" \
+        --output "$submitted_execution_dir/$HP_DECOMPRESSOR" \
+        "$submission_entry_dir/$HP_DECOMPRESSOR" >/dev/null; then
+      stage_fail submitted_validation "declared DECOMPRESSOR could not be validated"
+    fi
+  fi
+
+  qualification_command=("$script_dir/qualify-archive.sh" --skip-build
+    --container-id-file "$qualification_container_file"
+    --results "$run_results/submitted-decompression"
+    --output "$decompressed_output" "${common_limits[@]}")
+  if [[ "$HP_ENTRY_FORMAT" == self-extracting ]]; then
+    qualification_command+=(--executable "$HP_ARCHIVE")
+  else
+    qualification_command+=(
+      --executable "$HP_DECOMPRESSOR"
+      --arguments-file "$entry_dir/$HP_DECOMPRESSOR_ARGUMENTS"
+      --payload-file "$submission_entry_dir/$HP_ARCHIVE"
+      --payload-name "$HP_ARCHIVE"
+    )
+  fi
+  qualification_command+=("$submitted_execution_dir" "$reference_path")
+
+  if (( job_slots == 2 )); then
+    execution_mode=parallel
+    echo "[$entry_name] starting submitted decompression qualification in parallel" >&2
+    "${qualification_command[@]}" &
+    qualification_pid=$!
+  else
+    execution_mode=serial
+    echo "[$entry_name] validating submitted decompression in serial mode" >&2
+    if ! "${qualification_command[@]}"; then
+      stage_fail submitted_decompression "submitted artifacts did not reproduce enwik9"
+    fi
+    submitted_qualification=pass
   fi
 fi
 
@@ -544,10 +576,11 @@ if ! "$script_dir/compress-entry.sh" \
   stage_fail compression "rebuilt compressor failed"
 fi
 
-if (( job_slots == 2 )); then
+if [[ "$source_only" != true ]] && (( job_slots == 2 )); then
   echo "[$entry_name] compression finished; waiting for submitted qualification" >&2
   if wait "$qualification_pid"; then
     qualification_pid=""
+    submitted_qualification=pass
   else
     qualification_exit=$?
     qualification_pid=""
@@ -556,29 +589,44 @@ if (( job_slots == 2 )); then
   fi
 fi
 
-submitted_archive="$submission_entry_dir/$HP_ARCHIVE"
-submitted_sha256="$(sha256sum "$submitted_archive" | awk '{print $1}')"
 generated_sha256="$(sha256sum "$generated_archive" | awk '{print $1}')"
-rebuilt_decompressor_identical=not_applicable
-if [[ "$HP_ENTRY_FORMAT" == separate-decompressor ]]; then
+submitted_archive=""
+submitted_archive_bytes=not_provided
+submitted_sha256=not_provided
+archives_identical=not_evaluated
+rebuilt_decompressor_identical=not_evaluated
+if [[ "$source_only" != true ]]; then
+  submitted_archive="$submission_entry_dir/$HP_ARCHIVE"
+  submitted_archive_bytes="$(stat --format='%s' "$submitted_archive")"
+  submitted_sha256="$(sha256sum "$submitted_archive" | awk '{print $1}')"
+  rebuilt_decompressor_identical=not_applicable
+fi
+if [[ "$source_only" != true \
+    && "$HP_ENTRY_FORMAT" == separate-decompressor ]]; then
   if cmp --silent -- "$submission_entry_dir/$HP_DECOMPRESSOR" "$decompressor_path"; then
     rebuilt_decompressor_identical=yes
   else
     rebuilt_decompressor_identical=no
   fi
 fi
-if cmp --silent -- "$submitted_archive" "$generated_archive"; then
-  archives_identical=yes
-else
-  archives_identical=no
+if [[ "$source_only" != true ]]; then
+  if cmp --silent -- "$submitted_archive" "$generated_archive"; then
+    archives_identical=yes
+  else
+    archives_identical=no
+  fi
 fi
-if [[ "$archives_identical" == yes \
+if [[ "$source_only" != true && "$archives_identical" == yes \
     && "$rebuilt_decompressor_identical" != no ]]; then
   second_decompression=skipped_identical
   echo "[$entry_name] generated archive is byte-identical; second decompression skipped" >&2
 else
   second_decompression=required
-  echo "[$entry_name] generated artifacts require a fresh decompression" >&2
+  if [[ "$source_only" == true ]]; then
+    echo "[$entry_name] qualifying the source-built generated archive" >&2
+  else
+    echo "[$entry_name] generated artifacts require a fresh decompression" >&2
+  fi
   generated_qualification=("$script_dir/qualify-archive.sh" --skip-build
     --results "$run_results/generated-decompression"
     --output "$decompressed_output" "${common_limits[@]}")
@@ -612,7 +660,6 @@ fi
 
 compressor_bytes="$(stat --format='%s' "$compressor_path")"
 generated_archive_bytes="$(stat --format='%s' "$generated_archive")"
-submitted_archive_bytes="$(stat --format='%s' "$submitted_archive")"
 decompressor_bytes=0
 decompressor_multiplier=0
 decompressor_command_line_bytes=0
@@ -635,9 +682,18 @@ if (( formal_total_bytes <= threshold_bytes )); then
 else
   record_status=DOES_NOT_MEET_ONE_PERCENT
 fi
+if [[ "$source_only" == true ]]; then
+  technical_verdict=SOURCE_ONLY_PASS
+  evaluation_scope=source_only
+else
+  technical_verdict=PASS
+  evaluation_scope=full_submission
+fi
 
 {
-  echo "technical_verdict=PASS"
+  echo "technical_verdict=$technical_verdict"
+  echo "evaluation_scope=$evaluation_scope"
+  echo "submitted_qualification=$submitted_qualification"
   echo "record_status=$record_status"
   echo "entry=$entry_name"
   echo "geekbench5_score=$geekbench_score"
@@ -680,7 +736,12 @@ fi
 } > "$run_results/final.env"
 
 {
-  echo "Technical verdict: PASS"
+  if [[ "$source_only" == true ]]; then
+    echo "Source-only diagnostic: PASS"
+    echo "Submitted decompression qualification: skipped"
+  else
+    echo "Technical verdict: PASS"
+  fi
   echo "Record threshold: $record_status"
   echo "Generated/submitted archives identical: $archives_identical"
   echo "Second generated-archive decompression: $second_decompression"

@@ -8,6 +8,7 @@ entry_dir=""
 output_dir=""
 results_path="$script_dir/Results"
 skip_build=false
+source_only=false
 prepared_success=false
 output_created=false
 
@@ -38,6 +39,7 @@ Options:
   --results DIR      Store preparation evidence under DIR (default: ./Results)
   --image NAME       Override the catalog-derived local image tag
   --skip-build       Reuse the common judging image
+  --source-only      Do not require or inventory submitted runtime artifacts
   -h, --help         Show this help
 EOF
 }
@@ -56,6 +58,7 @@ while (( $# > 0 )); do
     --results) (( $# >= 2 )) || usage_error "$1 requires a value"; results_path="$2"; shift 2 ;;
     --image) (( $# >= 2 )) || usage_error "$1 requires a value"; image="$2"; shift 2 ;;
     --skip-build) skip_build=true; shift ;;
+    --source-only) source_only=true; shift ;;
     -h|--help) usage; exit 0 ;;
     -*) usage_error "unknown option: $1" ;;
     *) [[ -z "$entry_dir" ]] || usage_error "only one ENTRY_DIR may be supplied"; entry_dir="$1"; shift ;;
@@ -74,9 +77,12 @@ image="${image:-$(hp_qualification_os_image_tag "$HP_QUALIFICATION_OS")}" \
 readonly package="$entry_dir/$HP_SOURCE_PACKAGE"
 [[ -f "$package" && ! -L "$package" ]] \
   || die "SOURCE_PACKAGE is missing or is not a regular file: $HP_SOURCE_PACKAGE"
-[[ -f "$entry_dir/$HP_ARCHIVE" && ! -L "$entry_dir/$HP_ARCHIVE" ]] \
-  || die "ARCHIVE is missing or is not a regular file: $HP_ARCHIVE"
-if [[ "$HP_ENTRY_FORMAT" == separate-decompressor ]]; then
+if [[ "$source_only" != true ]]; then
+  [[ -f "$entry_dir/$HP_ARCHIVE" && ! -L "$entry_dir/$HP_ARCHIVE" ]] \
+    || die "ARCHIVE is missing or is not a regular file: $HP_ARCHIVE"
+fi
+if [[ "$source_only" != true \
+    && "$HP_ENTRY_FORMAT" == separate-decompressor ]]; then
   [[ -f "$entry_dir/$HP_DECOMPRESSOR" && ! -L "$entry_dir/$HP_DECOMPRESSOR" ]] \
     || die "submitted DECOMPRESSOR is missing or invalid: $HP_DECOMPRESSOR"
 fi
@@ -158,8 +164,14 @@ chmod 0444 "$result_dir/scripts/"*
   echo "qualification_os=$HP_QUALIFICATION_OS"
   echo "qualification_os_image=$(hp_qualification_os_image "$HP_QUALIFICATION_OS")"
   echo "archive_file=$HP_ARCHIVE"
-  echo "archive_bytes=$(stat --format='%s' "$entry_dir/$HP_ARCHIVE")"
-  echo "archive_sha256=$(sha256sum "$entry_dir/$HP_ARCHIVE" | awk '{print $1}')"
+  if [[ "$source_only" == true ]]; then
+    echo "archive_bytes=not_provided"
+    echo "archive_sha256=not_provided"
+  else
+    echo "archive_bytes=$(stat --format='%s' "$entry_dir/$HP_ARCHIVE")"
+    echo "archive_sha256=$(sha256sum "$entry_dir/$HP_ARCHIVE" | awk '{print $1}')"
+  fi
+  echo "source_only=$source_only"
   echo "preparation_network=none"
   echo "preparation_uid=65532"
   echo "judging_image=$image"

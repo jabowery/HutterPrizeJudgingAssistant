@@ -8,6 +8,7 @@ source "$script_dir/lib/resource-units.sh"
 source "$script_dir/lib/cold-cache.sh"
 source "$script_dir/lib/qualification-os.sh"
 source "$script_dir/lib/entry-env.sh"
+source "$script_dir/lib/host-dependencies.sh"
 
 image=""
 qualification_os=""
@@ -30,7 +31,7 @@ memory_limit_bytes="$HP_PEAK_RSS_LIMIT_BYTES"
 disk_limit_bytes=100000000000
 disk_poll_seconds=10
 cpu_limit=1
-runtime_exec_policy=strict
+runtime_exec_policy=process-tree
 record_size=110793128
 preflight_only=false
 skip_build=false
@@ -61,7 +62,7 @@ Options:
   --enwik9 FILE              Reference enwik9 (default: ./enwik9)
   --entry NAME               Process only NAME; may be repeated
   --results DIR              Result directory (default: ./Results)
-  --work-root DIR            Put isolated work directories on this filesystem
+  --work-root DIR            Override automatic ./Work storage selection
   --executable NAME          Override the manifest-declared executable
   --arguments-file FILE      Literal argument vector, one argument per line
   --payload-file FILE        Optional read-only input payload
@@ -73,8 +74,8 @@ Options:
   --disk-limit-bytes N       Sampled allocated-disk limit (default: 100 GB)
   --disk-poll-seconds N      Disk sampling interval (default: 10)
   --cpus N                   CPU capacity (default: 1)
-  --runtime-exec-policy P    strict or process-tree (default: strict)
-  --cold-cache               Evict and verify the exact staged input before start
+  --runtime-exec-policy P    process-tree (default) or strict diagnostic mode
+  --cold-cache               Enable cache control for a diagnostic run
   --record-size N            Previous record L (default: 110793128)
   --expected-size N          Reference/output size (default: 1000000000)
   --image NAME               Override the catalog-derived local image tag
@@ -344,9 +345,8 @@ for numeric_value in \
   [[ "$value" =~ ^[1-9][0-9]*$ ]] || usage_error "$numeric_value must be a positive integer"
 done
 
-if [[ "$preflight_only" != true && "$expected_size" == 1000000000 \
-    && "$cold_cache" != true ]]; then
-  usage_error "formal enwik9 runs require --cold-cache"
+if [[ "$preflight_only" != true && "$expected_size" == 1000000000 ]]; then
+  cold_cache=true
 fi
 if [[ "$cold_cache" == true && "$preflight_only" == true ]]; then
   usage_error "--cold-cache cannot be combined with --preflight-only"
@@ -481,6 +481,7 @@ fi
   || usage_error "--output is required without one unambiguous entry.env and must be a plain file name"
 
 if [[ "$preflight_only" != true ]]; then
+  hp_host_dependencies_ensure "$script_dir" || exit 2
   require_docker_daemon
 fi
 
@@ -492,6 +493,8 @@ run_results="$results_path/$run_stamp"
 mkdir -p -- "$run_results"
 
 if [[ "$preflight_only" != true ]]; then
+  work_root="${work_root:-$script_dir/Work}"
+  mkdir -p -- "$work_root" || die "could not create work root: $work_root"
   if [[ "$skip_build" != true ]]; then
     hp_qualification_os_build "$qualification_os" "$image" "$script_dir"
   else
@@ -517,17 +520,11 @@ if [[ "$preflight_only" != true ]]; then
       'BEGIN { print int((70000 * 3600) / score) }')"
   fi
 
-  if [[ -n "$work_root" ]]; then
-    [[ -d "$work_root" && ! -L "$work_root" ]] \
-      || die "work root is not a regular directory: $work_root"
-    [[ -w "$work_root" ]] || die "work root is not writable: $work_root"
-    work_root="$(realpath -- "$work_root")"
-    work_filesystem_path="$work_root"
-  else
-    [[ "$cold_cache" != true ]] \
-      || die "--cold-cache requires --work-root so the exact staged inode can be verified"
-    work_filesystem_path="$(docker info --format '{{.DockerRootDir}}')"
-  fi
+  [[ -d "$work_root" && ! -L "$work_root" ]] \
+    || die "work root is not a regular directory: $work_root"
+  [[ -w "$work_root" ]] || die "work root is not writable: $work_root"
+  work_root="$(realpath -- "$work_root")"
+  work_filesystem_path="$work_root"
 
   if [[ "$cold_cache" == true ]]; then
     hp_cold_cache_validate_work_root "$work_root" || exit 2

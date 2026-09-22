@@ -43,13 +43,8 @@ assert_formal_rejection() {
   grep -q -- "$expected" "$test_dir/rejection.stderr"
 }
 
-assert_formal_rejection 'formal enwik9 runs require --cold-cache' \
-  "$project_dir/judging_assistance.sh" --work-root /tmp /missing /missing
-assert_formal_rejection 'refuses parallel execution' \
-  "$project_dir/judging_assistance.sh" --cold-cache \
-    --work-root /tmp /missing /missing
-assert_formal_rejection 'formal enwik9 runs require --cold-cache' \
-  "$project_dir/qualify-archive.sh" /missing /missing
+assert_formal_rejection 'formal cache control requires serial execution' \
+  "$project_dir/judging_assistance.sh" --jobs 2 /missing /missing
 assert_formal_rejection 'formal enwik9 runs require --cold-cache' \
   "$project_dir/compress-entry.sh" /missing /missing /missing
 

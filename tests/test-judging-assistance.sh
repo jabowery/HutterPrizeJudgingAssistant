@@ -19,6 +19,7 @@ mkdir -p \
   "$test_dir/Entries/ParallelFail" \
   "$test_dir/Entries/HelperEscape" \
   "$test_dir/Entries/RuntimeTree" \
+  "$test_dir/Entries/SourceOnly" \
   "$test_dir/Entries/SlowCompression" \
   "$test_dir/Entries/BadManifest" \
   "$test_dir/Entries/Separate"
@@ -187,6 +188,8 @@ make_entry "$test_dir/Entries/Different" submitted generated zip
 make_entry "$test_dir/Entries/ParallelFail" submitted generated tar slow fail
 make_entry "$test_dir/Entries/HelperEscape" identical identical tar success helper
 make_entry "$test_dir/Entries/RuntimeTree" identical identical tar success runtime-tree
+make_entry "$test_dir/Entries/SourceOnly" absent generated tar
+rm -- "$test_dir/Entries/SourceOnly/archive9"
 make_entry "$test_dir/Entries/SlowCompression" identical identical tar success slow
 make_entry "$test_dir/Entries/BadManifest" identical identical tar \
   success success invalid
@@ -368,7 +371,7 @@ lfs_automatic_exit=$?
 set -e
 (( lfs_automatic_exit == 2 ))
 cmp --silent -- "$test_dir/materialized-archive9" "$lfs_repo_entry/archive9"
-grep -q 'Git LFS is required; installing it with the trusted host helper' \
+grep -q 'Installing missing trusted host dependencies: git-lfs' \
   "$test_dir/lfs-automatic.stderr"
 grep -q 'Materializing required Git LFS objects' \
   "$test_dir/lfs-automatic.stderr"
@@ -490,7 +493,7 @@ helper_escape_final="$(find "$test_dir/results-HelperEscape" \
   -name final.env -type f -print -quit)"
 grep -q '^failed_stage=compression$' "$helper_escape_final"
 
-run_full RuntimeTree --serial --runtime-exec-policy process-tree
+run_full RuntimeTree --serial
 runtime_tree_final="$(find "$test_dir/results-RuntimeTree" \
   -name final.env -type f -print -quit)"
 grep -q '^technical_verdict=PASS$' "$runtime_tree_final"
@@ -498,6 +501,19 @@ grep -q '^runtime_exec_policy=process-tree$' "$runtime_tree_final"
 runtime_tree_events="$(find "$test_dir/results-RuntimeTree" \
   -path '*/compression/*/execution-events.tsv' -type f -print -quit)"
 grep -q $'\texec-permitted\t.*\t./comp9$' "$runtime_tree_events"
+
+run_full SourceOnly --source-only
+source_only_final="$(find "$test_dir/results-SourceOnly" \
+  -name final.env -type f -print -quit)"
+grep -q '^technical_verdict=SOURCE_ONLY_PASS$' "$source_only_final"
+grep -q '^evaluation_scope=source_only$' "$source_only_final"
+grep -q '^submitted_qualification=skipped_source_only$' "$source_only_final"
+grep -q '^submitted_archive_bytes=not_provided$' "$source_only_final"
+grep -q '^archives_identical=not_evaluated$' "$source_only_final"
+grep -q '^second_decompression=pass$' "$source_only_final"
+[[ ! -d "$(dirname -- "$source_only_final")/submitted-decompression" ]]
+find "$(dirname -- "$source_only_final")/generated-decompression" \
+  -name summary.tsv -type f | grep -q .
 
 # Crossing the compression allowance is an immediate failed result, but the
 # compressor is allowed to finish and produce evidence unless the operator

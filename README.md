@@ -45,16 +45,11 @@ formal run from such a pointer-only archive.
 
 A formal run requires:
 
-- an x86-64 Linux Docker host with at least 16 GiB RAM;
-- a local Docker Engine daemon reached through a Unix socket (Docker Compose is
-  not used);
+- an x86-64 Linux host with at least 16 GiB RAM;
 - a maintained Linux kernel providing seccomp, `no_new_privs`, Landlock ABI 3
   or newer, and an enforcing AppArmor or SELinux container profile;
-- `git` for the recommended clone, plus `bash`, `sudo`, `curl`, GNU coreutils,
-  `findutils`, `awk`, `sed`, and `util-linux` (including `flock`); ordinary
-  Ubuntu installations provide all but some optional packages by default;
-- permission to use `sudo` for Docker access when necessary and for the narrow
-  cold-cache helper, which must be able to write `/proc/sys/vm/drop_caches`;
+- `git` to obtain the recommended clone and permission to use `sudo` for
+  trusted host setup and formal cache control;
 - a writable work filesystem with at least 100 GB free, in addition to space
   used by Docker images, the repository, input files, and retained results;
 - the exact 1,000,000,000-byte `enwik9` reference and a complete entry
@@ -62,33 +57,44 @@ A formal run requires:
 - temporary outbound Internet access for cloning/LFS materialization, base
   image and dependency installation, and automatic Geekbench 5 calibration.
 
-The judging system installs `git-lfs` through its separate trusted host helper
-when a clone contains unresolved pointers. It does not install Docker Engine or
-`git`. Entrant build dependencies are installed inside the declared
-qualification image, not on the host. The security preflight verifies the
-Docker and kernel confinement conditions before any entrant-provided code is
-unpacked or executed. Rootless Docker or user-namespace remapping adds an
-identity boundary but is currently advisory rather than mandatory.
+On an `apt`-based host, the judging system invokes its separate trusted
+`install-host-dependencies.sh` helper through `sudo` when required. That helper
+installs and starts Docker Engine and installs Git LFS and the ordinary host
+utilities. Docker Compose is not used. Entrant build dependencies are installed
+inside the declared qualification image, not on the host. The security
+preflight verifies the Docker and kernel confinement conditions before any
+entrant-provided code is unpacked or executed. Rootless Docker or user-namespace
+remapping adds an identity boundary but is currently advisory rather than
+mandatory.
 
 ## Run
 
 From the repository root:
 
 ```bash
-./judging_assistance.sh \
-  --cold-cache --serial \
-  --work-root /mnt/large-disk/HutterPrizeJudging \
-  Entries/NAME ./enwik9
+./judging_assistance.sh Entries/NAME
 ```
 
-The work filesystem must have at least the configured 100 GB allowance. A
-formal one-billion-byte `enwik9` run requires `--cold-cache` and serial
-execution. Diagnostic runs over smaller fixtures may still use the default
-`--jobs 2`; the orchestrator refuses to combine cache eviction with parallel
-execution. `--geekbench-score N` reuses a separately verified Geekbench 5
-single-core score. Entries that need to unpack, generate, or invoke descendant
-executables use `--runtime-exec-policy process-tree` under the rules in
-[RELAXATION.md](RELAXATION.md); the default is the strict diagnostic policy.
+For the default one-billion-byte `enwik9` run, the orchestrator automatically
+uses serial execution, process-tree accounting, cold-cache eviction and
+verification, automatic Geekbench calibration, and a `Work/` directory on the
+repository filesystem. If that filesystem lacks 100 GB free, use
+`--work-root DIR` to select another local filesystem. `--geekbench-score N`
+reuses a separately verified Geekbench 5 single-core score. The explicit
+resource, concurrency, cache, and strict-execution options remain available for
+diagnostic tests; they are not part of the ordinary formal invocation.
+
+To test entrant source before a submitted archive is available, run:
+
+```bash
+./judging_assistance.sh --source-only Entries/NAME
+```
+
+This diagnostic skips the submitted decompression phase, builds the declared
+compressor (and separate decompressor, if applicable), compresses `enwik9`, and
+always decompresses and verifies the generated archive. It records
+`SOURCE_ONLY_PASS`, not a full technical judging verdict, because no submitted
+archive was qualified.
 
 The current Docker worker executes Linux x86/x86-64 entries. The manifest also
 defines Windows x86/x86-64 names so the same orchestration contract can be used
@@ -98,12 +104,11 @@ than running it under an unscored compatibility layer.
 ## Automatic host initialization
 
 Invoke `judging_assistance.sh` as an ordinary user. In a Git clone, when
-necessary, it installs Git LFS through the separate
-`install-host-dependencies.sh` helper, materializes the required repository
-objects, and re-executes the trusted host orchestrator through `sudo` to access
-Docker. The customary password prompt is the only required interaction.
-Results created by the elevated process are returned to the invoking user's
-ownership.
+necessary, it uses the separate `install-host-dependencies.sh` helper to install
+trusted host tools, materializes the required repository objects, and
+re-executes the trusted host orchestrator through `sudo` to access Docker. The
+customary password prompt is the only required interaction. Results created by
+the elevated process are returned to the invoking user's ownership.
 
 The qualification-only `benchmark.sh` and `qualify-archive.sh` wrappers use
 the same Docker-access behavior: invoke them as an ordinary user and they
@@ -266,9 +271,8 @@ orchestrator checks that it is a regular file and records its size, SHA-256
 digest, and type before another container can receive it. The trusted execution
 monitor always traces the complete descendant tree. It runs as a non-dumpable
 UID 0 supervisor and creates the entrant process as UID/GID 65532 after
-dropping the entrant's capability bounding set. Under the default `strict`
-policy it permits the one declared executable transition and rejects later
-`execve`/`execveat` calls.
+dropping the entrant's capability bounding set. The formal default is the
+`process-tree` policy specified in [RELAXATION.md](RELAXATION.md).
 
 The entrant receives the container's genuine procfs, scoped by Docker's PID
 namespace, so ordinary Linux interfaces such as `/proc/self/statm`,
@@ -280,15 +284,15 @@ trusted UID 0 supervisor's maps, executable, or file descriptors. Host
 processes remain outside the container PID namespace. No contestant process
 receives `CAP_SYS_ADMIN` or permission to mount a filesystem.
 
-The explicitly selected `process-tree` relaxation permits later executable
-transitions without creating new size or resource allowances. This accommodates
-packed and multi-stage programs whose helpers are decoded or generated from
-already-counted phase inputs. It does not make independently staged entrant
-files free: those remain outside information and must be declared and counted.
-All descendants remain in the original container and cgroup. The report records
-phase-input sizes and hashes, execution events, and hashes of persistent
-runtime executables. Failure only under `strict` is not a failure under the
-selected relaxation.
+The `process-tree` policy permits later executable transitions without creating
+new size or resource allowances. This accommodates packed and multi-stage
+programs whose helpers are decoded or generated from already-counted phase
+inputs. It does not make independently staged entrant files free: those remain
+outside information and must be declared and counted. All descendants remain
+in the original container and cgroup. The report records phase-input sizes and
+hashes, execution events, and hashes of persistent runtime executables. The
+`strict` policy remains available as a diagnostic override that rejects later
+`execve`/`execveat` calls; failure only under `strict` is not a formal failure.
 
 Source tar/ZIP extraction, `install.sh`, and `build.sh` are separate containers.
 `install.sh` supplies both build dependencies and any shared libraries needed
@@ -384,6 +388,7 @@ does not let an entrant declare its own score.
 
 ```bash
 ./tests/test-terminology.sh
+./tests/test-repository-safety.sh
 ./tests/test-host-security-preflight.sh
 ./tests/test-validate-executable.sh
 ./tests/test-example-entry.sh
@@ -399,6 +404,11 @@ does not let an entrant declare its own score.
 The qualification-OS test verifies the allow-listed aliases, pinned image
 references, manifest rejection, and parameterized Dockerfile stages. The
 terminology test enforces the human/software distinction above. The
+repository-safety test enforces the exclusion of repository-local `tmp/`
+material and verifies that the push guard examines outgoing history, including
+files deleted before the push. Repository maintainers enable the tracked hooks
+once per clone with `git config core.hooksPath .githooks`; the pre-push hook
+also preserves Git LFS's normal upload check.
 security-preflight test covers required confinement failures, local-daemon
 enforcement, and remapped and unremapped UID behavior. The executable-validation
 test checks that pure and overlay UPX artifacts are inspected and then executed

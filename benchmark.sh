@@ -5,6 +5,7 @@ readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly -a original_argv=("$@")
 source "$script_dir/lib/prize-limits.sh"
 source "$script_dir/lib/qualification-os.sh"
+source "$script_dir/lib/host-dependencies.sh"
 image=""
 qualification_os="$HP_DEFAULT_QUALIFICATION_OS"
 results_path="$script_dir/Results"
@@ -93,6 +94,7 @@ qualification_os_image="$(hp_qualification_os_image "$qualification_os")" \
   || usage_error "invalid qualification OS"
 image="${image:-$(hp_qualification_os_image_tag "$qualification_os")}" \
   || die "could not derive qualification image tag"
+hp_host_dependencies_ensure "$script_dir" || exit 2
 require_docker_daemon
 if [[ "$skip_build" == true ]]; then
   docker image inspect "$image" >/dev/null || die "Docker image does not exist: $image"

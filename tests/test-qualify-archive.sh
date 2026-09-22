@@ -232,6 +232,7 @@ grep -q $'^Bad\tFAIL_MISMATCH\t' "$bad_summary"
 set +e
 "$project_dir/qualify-archive.sh" \
   --skip-build \
+  --runtime-exec-policy strict \
   --executable archive9 \
   --output data9 \
   --entry Nested \
@@ -253,7 +254,6 @@ grep -q 'rejected an undeclared additional executable invocation' "$nested_stder
 set +e
 "$project_dir/qualify-archive.sh" \
   --skip-build \
-  --runtime-exec-policy process-tree \
   --executable archive9 \
   --output data9 \
   --entry ProcessTree \

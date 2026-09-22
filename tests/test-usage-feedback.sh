@@ -80,16 +80,6 @@ expect_usage_error cold-cache-helper-missing \
 expect_usage_error benchmark-invalid-qualification-os \
   "$project_dir/benchmark.sh" --qualification-os not-in-the-catalog
 
-# Regression for the common qualification invocation that omits the mandatory
-# formal-run cache control: the diagnostic must explain how to correct it.
-expect_usage_error qualify-archive-cold-cache \
-  "$project_dir/qualify-archive.sh" "$project_dir/Entries/Example"
-grep -q 'formal enwik9 runs require --cold-cache' \
-  "$test_root/qualify-archive-cold-cache.stderr" \
-  || fail "qualification diagnostic did not identify --cold-cache"
-grep -q '^  --cold-cache ' "$test_root/qualify-archive-cold-cache.stderr" \
-  || fail "qualification usage did not describe --cold-cache"
-
 expect_usage_error qualify-archive-entry-path \
   "$project_dir/qualify-archive.sh" \
     --preflight-only \

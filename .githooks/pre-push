@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+updates="$(cat)"
+
+printf '%s\n' "$updates" \
+  | "$repo_root/scripts/check-repository-safety.sh" --pre-push "$1"
+
+command -v git-lfs >/dev/null 2>&1 || {
+  echo "error: Git LFS is required to push this repository" >&2
+  exit 2
+}
+printf '%s\n' "$updates" | git lfs pre-push "$@"

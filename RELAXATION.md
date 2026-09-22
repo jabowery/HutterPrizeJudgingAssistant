@@ -216,9 +216,10 @@ tools, dictionaries, models, or other build products to a runtime phase.
 
 ## Judging-assistant behavior
 
-The `--runtime-exec-policy process-tree` option selects the execution policy
-specified here. Qualification under this policy requires aggregate resource
-accounting and complete phase-boundary evidence as specified above.
+The formal judging flow uses the process-tree execution policy specified here
+by default; `--runtime-exec-policy process-tree` may also select it explicitly
+in diagnostic invocations. Qualification under this policy requires aggregate
+resource accounting and complete phase-boundary evidence as specified above.
 
 The strict policy MAY be used as a diagnostic option. Failure under the strict
 policy alone is not evidence that an entry violates this relaxation.

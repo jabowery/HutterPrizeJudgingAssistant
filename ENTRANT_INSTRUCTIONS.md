@@ -268,13 +268,14 @@ UID 0 supervisor's sensitive entries inaccessible. The same Landlock policy
 limits ordinary file access to the declared working directory, procfs, runtime
 libraries, `/bin/sh`, and `/dev/null`.
 
-The default `strict` runtime policy permits forks and threads but rejects every
-later `execve`/`execveat`. Under that policy, an additional independently
+The `strict` diagnostic runtime policy permits forks and threads but rejects
+every later `execve`/`execveat`. Under that policy, an additional independently
 supplied executable must be expressed as a declared artifact stage so the
 orchestrator can return it across a phase boundary before it runs.
 
-The [runtime process-tree and packed-executable relaxation](RELAXATION.md) may
-instead be selected with:
+The formal flow defaults to the
+[runtime process-tree and packed-executable relaxation](RELAXATION.md), which
+may also be selected explicitly with:
 
 ```text
 --runtime-exec-policy process-tree

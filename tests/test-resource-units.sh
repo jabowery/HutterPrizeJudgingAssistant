@@ -23,10 +23,14 @@ source "$project_dir/lib/resource-units.sh"
 qualify_help="$($project_dir/qualify-archive.sh --help)"
 [[ "$qualify_help" == *"default: 10 GiB"* ]]
 [[ "$qualify_help" == *"default: 100 GB"* ]]
+[[ "$qualify_help" == *"process-tree (default)"* ]]
+[[ "$qualify_help" == *"automatic ./Work"* ]]
 [[ "$qualify_help" != *"10737418240 = 10 GiB"* ]]
 
 assistance_help="$($project_dir/judging_assistance.sh --help)"
 [[ "$assistance_help" == *"default: 10 GiB"* ]]
 [[ "$assistance_help" == *"Default: 100 GB"* ]]
+[[ "$assistance_help" == *"process-tree (default)"* ]]
+[[ "$assistance_help" == *"automatic ./Work"* ]]
 
 echo "resource unit format tests passed"

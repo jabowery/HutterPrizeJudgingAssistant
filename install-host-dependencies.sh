@@ -5,8 +5,9 @@ usage() {
   cat <<'EOF'
 Usage: sudo ./install-host-dependencies.sh
 
-Install the trusted host-side Git LFS dependency used by the judging system.
-This helper requires root and accepts no options.
+Install trusted host-side dependencies used by the judging system, including
+Docker Engine when it is absent. This helper requires root and accepts no
+options. Entrant-provided code is never executed here.
 EOF
 }
 
@@ -30,5 +31,19 @@ command -v apt-get >/dev/null \
   || { echo "error: automatic host dependency installation requires apt-get" >&2; exit 2; }
 
 export DEBIAN_FRONTEND=noninteractive
+
+packages=(
+  bash ca-certificates coreutils curl findutils git git-lfs grep mawk sed util-linux
+)
+if ! command -v docker >/dev/null 2>&1; then
+  packages+=(apparmor docker.io)
+fi
+
 apt-get update
-apt-get install --yes --no-install-recommends git-lfs
+apt-get install --yes --no-install-recommends "${packages[@]}"
+
+if command -v docker >/dev/null 2>&1 \
+    && command -v systemctl >/dev/null 2>&1 \
+    && [[ -d /run/systemd/system ]]; then
+  systemctl enable --now docker
+fi
