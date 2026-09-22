@@ -40,22 +40,39 @@ FAKE_SUDO_LOG="$test_dir/qualify-sudo.log" \
     "$test_dir/entry" "$test_dir/enwik9" \
     > "$test_dir/qualify.stdout" 2> "$test_dir/qualify.stderr"
 qualify_exit=$?
+
+FAKE_SUDO_LOG="$test_dir/judging-sudo.log" \
+  PATH="$test_dir/bin:$PATH" \
+  "$project_dir/judging_assistance.sh" \
+    --cold-cache \
+    --expected-size "$(stat --format='%s' "$test_dir/enwik9")" \
+    --work-root "$test_dir/judging-work" \
+    --results "$test_dir/judging-results" \
+    "$test_dir/entry" "$test_dir/enwik9" \
+    > "$test_dir/judging.stdout" 2> "$test_dir/judging.stderr"
+judging_exit=$?
 set -e
 
 if (( EUID == 0 )); then
   (( benchmark_exit == 2 ))
   (( qualify_exit == 2 ))
+  (( judging_exit == 2 ))
   grep -q 'root cannot access the Docker daemon' "$test_dir/benchmark.stderr"
   grep -q 'root cannot access the Docker daemon' "$test_dir/qualify.stderr"
+  grep -q 'root cannot access the Docker daemon' "$test_dir/judging.stderr"
   [[ ! -e "$test_dir/benchmark-sudo.log" ]]
   [[ ! -e "$test_dir/qualify-sudo.log" ]]
+  [[ ! -e "$test_dir/judging-sudo.log" ]]
 else
   (( benchmark_exit == 73 ))
   (( qualify_exit == 73 ))
+  (( judging_exit == 73 ))
   grep -q 'Docker daemon access requires elevation; invoking sudo' \
     "$test_dir/benchmark.stderr"
   grep -q 'Docker daemon access requires elevation; invoking sudo' \
     "$test_dir/qualify.stderr"
+  grep -q 'Docker daemon access requires elevation; invoking sudo' \
+    "$test_dir/judging.stderr"
 
   mapfile -t benchmark_sudo < "$test_dir/benchmark-sudo.log"
   [[ "${benchmark_sudo[0]}" == -- ]]
@@ -69,10 +86,17 @@ else
   [[ "${qualify_sudo[1]}" == "$project_dir/qualify-archive.sh" ]]
   [[ "${qualify_sudo[2]}" == --executable ]]
   [[ "${qualify_sudo[3]}" == archive9 ]]
+
+  mapfile -t judging_sudo < "$test_dir/judging-sudo.log"
+  [[ "${judging_sudo[0]}" == -- ]]
+  [[ "${judging_sudo[1]}" == "$project_dir/judging_assistance.sh" ]]
+  [[ "${judging_sudo[2]}" == --cold-cache ]]
 fi
 
 [[ ! -e "$test_dir/benchmark-results" ]]
 [[ ! -e "$test_dir/qualify-results" ]]
+[[ ! -e "$test_dir/judging-results" ]]
+[[ ! -e "$test_dir/judging-work" ]]
 
 chmod u+w "$test_dir/bin/docker"
 cat > "$test_dir/bin/docker" <<'EOF'

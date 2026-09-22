@@ -101,6 +101,11 @@ assert_create_evict_start_order() {
 
 assert_create_evict_start_order "$project_dir/qualify-archive.sh"
 assert_create_evict_start_order "$project_dir/compress-entry.sh"
+docker_access_line="$(grep -n '^require_docker_daemon$' \
+  "$project_dir/judging_assistance.sh" | cut -d: -f1)"
+cold_lock_line="$(grep -n '^[[:space:]]*hp_cold_cache_acquire_lock ' \
+  "$project_dir/judging_assistance.sh" | cut -d: -f1)"
+(( docker_access_line < cold_lock_line ))
 grep -q "printf '3\\\\n' > /proc/sys/vm/drop_caches" \
   "$project_dir/cold-cache-host-helper.sh"
 ! grep -q 'sudo.*drop_caches' "$project_dir/cold-cache-host-helper.sh"

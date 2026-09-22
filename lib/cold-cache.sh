@@ -51,6 +51,8 @@ hp_cold_cache_acquire_lock() {
   exec {HP_COLD_CACHE_LOCK_FD}<>"$lock_path"
   if ! flock --exclusive --nonblock "$HP_COLD_CACHE_LOCK_FD"; then
     echo "error: another cache-controlled judging run is active" >&2
+    echo "Inspect its lock holder with: sudo lslocks --output PID,COMMAND,MODE,PATH | grep hutter-prize-cold-cache" >&2
+    echo "Do not delete $lock_path while it may be locked." >&2
     return 2
   fi
   export HP_COLD_CACHE_LOCK_HELD=1

@@ -327,6 +327,7 @@ esac
 [[ -d "$entry_dir" && ! -L "$entry_dir" ]] || die "invalid entry directory: $entry_dir"
 [[ -f "$reference_path" && ! -L "$reference_path" ]] || die "invalid enwik9"
 hp_host_dependencies_ensure "$script_dir" || exit 2
+require_docker_daemon
 work_root="${work_root:-$script_dir/Work}"
 mkdir -p -- "$work_root" || die "could not create work root: $work_root"
 [[ -d "$work_root" && ! -L "$work_root" && -w "$work_root" ]] \
@@ -357,7 +358,6 @@ if [[ "$source_only" != true \
 fi
 
 require_materialized_assets
-require_docker_daemon
 
 [[ -e "$results_path" ]] || results_path_created=true
 mkdir -p -- "$results_path"
