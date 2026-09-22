@@ -4,6 +4,7 @@ set -Eeuo pipefail
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly -a original_argv=("$@")
 source "$script_dir/lib/entry-env.sh"
+source "$script_dir/lib/entry-location.sh"
 source "$script_dir/lib/dependency-image.sh"
 source "$script_dir/lib/prize-limits.sh"
 source "$script_dir/lib/resource-units.sh"
@@ -32,6 +33,7 @@ qualification_pid=""
 qualification_container_file=""
 results_path_created=false
 run_results=""
+work_capacity_error=""
 
 usage() {
   cat <<'EOF'
@@ -50,6 +52,9 @@ Complete standardized technical judging:
      and
   9. invoke the appropriate declared decompressor in another new container
      when the evaluated artifacts are not byte-identical to those qualified.
+
+ENTRY_DIR must be outside this repository. The sole exception is the public
+examples/well-formed-entry procedural fixture.
 
 Options:
   --work-root DIR            Override automatic ./Work storage selection
@@ -100,6 +105,21 @@ require_docker_daemon() {
     printf 'error: Docker daemon is unavailable:\n%s\n' "$diagnostic" >&2
   fi
   exit 2
+}
+check_work_capacity() {
+  local available_bytes
+  available_bytes="$(
+    df --block-size=1 --output=avail "$work_root" | awk 'NR == 2 { print $1 }'
+  )"
+  if [[ ! "$available_bytes" =~ ^[0-9]+$ ]]; then
+    work_capacity_error="could not determine free space for work filesystem $work_root"
+    return 1
+  fi
+  if (( available_bytes < disk_limit_bytes )); then
+    work_capacity_error="work filesystem $work_root has $(hp_format_gb "$available_bytes") free; the $(hp_format_gb "$disk_limit_bytes") disk allowance requires at least that much available space (use --work-root on a larger filesystem)"
+    return 1
+  fi
+  work_capacity_error=""
 }
 ensure_git_lfs() {
   command -v git >/dev/null \
@@ -326,16 +346,19 @@ esac
   || usage_error "invalid Geekbench score"
 [[ -d "$entry_dir" && ! -L "$entry_dir" ]] || die "invalid entry directory: $entry_dir"
 [[ -f "$reference_path" && ! -L "$reference_path" ]] || die "invalid enwik9"
+entry_dir="$(realpath -- "$entry_dir")"
+readonly submission_entry_dir="$entry_dir"
+hp_entry_location_require_external_or_fixture "$script_dir" "$entry_dir" \
+  || exit 2
 hp_host_dependencies_ensure "$script_dir" || exit 2
 require_docker_daemon
 work_root="${work_root:-$script_dir/Work}"
 mkdir -p -- "$work_root" || die "could not create work root: $work_root"
 [[ -d "$work_root" && ! -L "$work_root" && -w "$work_root" ]] \
   || die "invalid or unwritable work root: $work_root"
-entry_dir="$(realpath -- "$entry_dir")"
-readonly submission_entry_dir="$entry_dir"
 reference_path="$(realpath -- "$reference_path")"
 work_root="$(realpath -- "$work_root")"
+check_work_capacity || die "$work_capacity_error"
 if [[ "$cold_cache" == true ]]; then
   hp_cold_cache_validate_work_root "$work_root" "$reference_path" || exit 2
   hp_cold_cache_acquire_lock "$script_dir" || exit 2
@@ -448,6 +471,8 @@ if ! dependency_images="$(hp_dependency_image_build \
 fi
 IFS=$'\t' read -r dependency_build_image dependency_runtime_image \
   <<< "$dependency_images"
+check_work_capacity \
+  || stage_fail work_storage "after dependency-image construction: $work_capacity_error"
 
 common_limits=(
   --qualification-os "$qualification_os"

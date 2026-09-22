@@ -8,6 +8,7 @@ source "$script_dir/lib/resource-units.sh"
 source "$script_dir/lib/cold-cache.sh"
 source "$script_dir/lib/qualification-os.sh"
 source "$script_dir/lib/entry-env.sh"
+source "$script_dir/lib/entry-location.sh"
 source "$script_dir/lib/host-dependencies.sh"
 
 image=""
@@ -57,6 +58,9 @@ Qualify the archive declared by entry.env when ENTRIES_DIR is one entry
 directory (or --entry selects one child). Explicit artifact options override
 the manifest. Batch runs without one unambiguous manifest require explicit
 artifact options.
+
+A manifest-bearing entry directory must be outside this repository. The sole
+exception is the public examples/well-formed-entry procedural fixture.
 
 Options:
   --enwik9 FILE              Reference enwik9 (default: ./enwik9)
@@ -429,6 +433,13 @@ else
 fi
 
 (( ${#entry_dirs[@]} > 0 )) || die "no entry directories found in $entries_path"
+
+for entry_dir in "${entry_dirs[@]}"; do
+  if [[ -f "$entry_dir/entry.env" && ! -L "$entry_dir/entry.env" ]]; then
+    hp_entry_location_require_external_or_fixture "$script_dir" "$entry_dir" \
+      || exit 2
+  fi
+done
 
 manifest_path=""
 manifest_entry_format=""

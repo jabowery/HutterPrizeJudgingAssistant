@@ -1,5 +1,8 @@
 /Results/
 /Work/
 /enwik9
+# Contestant submissions must remain outside this repository. Ignore this
+# legacy location as a last-resort safeguard.
+/Entries/
 # Local scratch space may contain confidential entrant material.
 /tmp/

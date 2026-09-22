@@ -72,8 +72,13 @@ mandatory.
 From the repository root:
 
 ```bash
-./judging_assistance.sh Entries/NAME
+./judging_assistance.sh ../HutterPrizeSubmissions/NAME
 ```
+
+Real contestant material must be stored outside this Git repository. The
+repository-root `Entries/` path is ignored as a last-resort safeguard and is
+not a supported working location. The public, noncompetitive fixture remains
+available at `examples/well-formed-entry`.
 
 For the default one-billion-byte `enwik9` run, the orchestrator automatically
 uses serial execution, process-tree accounting, cold-cache eviction and
@@ -87,7 +92,7 @@ diagnostic tests; they are not part of the ordinary formal invocation.
 To test entrant source before a submitted archive is available, run:
 
 ```bash
-./judging_assistance.sh --source-only Entries/NAME
+./judging_assistance.sh --source-only ../HutterPrizeSubmissions/NAME
 ```
 
 This diagnostic skips the submitted decompression phase, builds the declared
@@ -95,6 +100,85 @@ compressor (and separate decompressor, if applicable), compresses `enwik9`, and
 always decompresses and verifies the generated archive. It records
 `SOURCE_ONLY_PASS`, not a full technical judging verdict, because no submitted
 archive was qualified.
+
+## Optional Google Cloud host
+
+`launch-cloud-judging.sh` provides the complete setup path for a disposable
+Google Compute Engine host. This is an optional way to obtain suitable hardware,
+not a required security boundary and not a substitute for the Linux-container
+security preflight. Run it locally from the repository root, using the gcloud
+credentials already selected in the invoking environment:
+
+```bash
+./launch-cloud-judging.sh \
+  --tags wg-node ../HutterPrizeSubmissions/NAME ./enwik9
+```
+
+The launcher performs the following trusted operations before entrant code is
+handled:
+
+1. Tries zones in `us-central1` until a `t2d-standard-4` can be allocated.
+2. Creates a Shielded Ubuntu 24.04 instance with a 200 GB SSD, at least 16 GiB
+   RAM, no attached service account, and no OAuth scopes.
+3. Applies Ubuntu updates, reboots into the updated kernel, and installs Docker,
+   Git LFS, tmux, and the ordinary host utilities.
+4. Clones and records the selected judging-system revision, transfers the entry
+   and `enwik9`, and verifies the transfers by SHA-256. Transient SSH upload
+   failures are retried automatically.
+5. Configures tmux for 100000 lines of scrollback and starts the run in a
+   detached session whose output is also written to a log.
+
+The 200 GB boot-disk default is intentional. The worker must still have the
+full 100 GB run allowance free after the operating system, Docker images,
+dependency layers, repository, inputs, and retained evidence have consumed
+space; a nominal 120 GB boot disk can fail that precondition.
+
+If the artifact named by `ARCHIVE` in `entry.env` is absent, the launcher
+automatically selects `--source-only`: it builds the compressor, compresses
+`enwik9`, and then qualifies the generated archive. If that artifact is
+present, it runs the full submitted-archive workflow. The launcher prints the
+exact commands to attach to tmux, retrieve results, and delete the instance.
+It deliberately retains the instance after completion or setup failure so
+evidence is not destroyed; cloud charges continue until the operator runs the
+printed deletion command.
+
+The local gcloud credentials are used only by the local provisioning process
+and are not copied to the instance. Google Cloud otherwise attaches the
+project's default Compute Engine service account in many configurations, whose
+tokens are available through the metadata server; the provisioner explicitly
+uses `--no-service-account` and `--no-scopes` and verifies the result. See the
+official
+[`gcloud compute instances create` reference](https://docs.cloud.google.com/sdk/gcloud/reference/compute/instances/create).
+Entrant code receives neither the Docker socket nor cloud credentials.
+
+All cloud and tmux defaults can be overridden explicitly. For example:
+
+```bash
+./launch-cloud-judging.sh \
+  --instance-name hutter-qualification-2 \
+  --machine-type n4d-highmem-2 \
+  --zone us-central1-b \
+  --boot-disk-size 240GB \
+  ../HutterPrizeSubmissions/NAME ./enwik9
+```
+
+To provision only the instance and print its selected zone, use the lower-level
+utility:
+
+```bash
+./provision-gcp-instance.sh \
+  --name hutter-judging-node \
+  --machine-type t2d-standard-4 \
+  --region us-central1 \
+  --boot-disk-size 200GB
+```
+
+The launcher uses the supported `gcloud compute ssh --command` and
+`gcloud compute scp` interfaces for remote setup and transfers; see their
+official [SSH](https://docs.cloud.google.com/sdk/gcloud/reference/compute/ssh)
+and [SCP](https://docs.cloud.google.com/sdk/gcloud/reference/compute/scp)
+references. Use `--dry-run` to validate the local entry and display the resolved
+execution mode without contacting Google Cloud.
 
 The current Docker worker executes Linux x86/x86-64 entries. The manifest also
 defines Windows x86/x86-64 names so the same orchestration contract can be used
@@ -392,6 +476,7 @@ does not let an entrant declare its own score.
 ./tests/test-host-security-preflight.sh
 ./tests/test-validate-executable.sh
 ./tests/test-example-entry.sh
+./tests/test-entry-location.sh
 ./tests/test-qualification-os.sh
 ./tests/test-resource-units.sh
 ./tests/test-cold-cache.sh
@@ -399,17 +484,20 @@ does not let an entrant declare its own score.
 ./tests/test-dependency-runtime.sh
 ./tests/test-qualify-archive.sh
 ./tests/test-judging-assistance.sh
+./tests/test-cloud-launch.sh
 ```
 
 The qualification-OS test verifies the allow-listed aliases, pinned image
 references, manifest rejection, and parameterized Dockerfile stages. The
 terminology test enforces the human/software distinction above. The
 repository-safety test enforces the exclusion of repository-local `tmp/`
-material and verifies that the push guard examines outgoing history, including
-files deleted before the push. Repository maintainers enable the tracked hooks
-once per clone with `git config core.hooksPath .githooks`; the pre-push hook
-also preserves Git LFS's normal upload check.
-security-preflight test covers required confinement failures, local-daemon
+and `Entries/` content. The public fixture instead resides under `examples/`.
+The test verifies that the push guard examines outgoing history, including
+prohibited files deleted before the push. Repository
+maintainers enable the tracked hooks once per clone with
+`git config core.hooksPath .githooks`; the pre-push hook also preserves Git
+LFS's normal upload check. The security-preflight test covers required
+confinement failures, local-daemon
 enforcement, and remapped and unremapped UID behavior. The executable-validation
 test checks that pure and overlay UPX artifacts are inspected and then executed
 byte-for-byte unchanged. The Example test checks that the successful fixture
@@ -423,8 +511,11 @@ re-execution through `sudo` when local Docker access requires it, and ownership
 restoration. The dependency-runtime test verifies that an
 `install.sh`-provided shared library is available to an entrant executable
 while the trusted worker remains unchanged and its execution monitor remains
-statically linked. The integration tests generate their own small entries and
-alternate `entry.env` manifests under a temporary directory.
+statically linked. The cloud-launch test uses simulated gcloud and tmux clients
+to verify capacity fallback, fixed identity hardening, option forwarding,
+manifest-driven source-only selection, and persistent scrollback without
+creating billable infrastructure. The integration tests generate their own
+small entries and alternate `entry.env` manifests under a temporary directory.
 Those synthetic entries cover tar and ZIP source packages, both official entry
 forms, parallel cancellation, memory/time/content failures, hidden build
 helpers, unknown manifest fields, strict rejection of a nested executable
@@ -435,9 +526,10 @@ can verify that the worker allowed completion.
 
 ## Example fixture status
 
-`Entries/Example` is a purpose-built procedural fixture with no code or design
-derived from a Hutter Prize submission. It exists only to fill every ordinary
-artifact slot and exercise the successful judging flow quickly.
+`examples/well-formed-entry` is a purpose-built procedural fixture with no code
+or design derived from a Hutter Prize submission. It exists only to fill every
+ordinary artifact slot and exercise the successful judging flow quickly. It is
+not a location for contestant material.
 
 The fixture consists of one statically linked, single-threaded, baseline
 x86-64 executable. In compression mode it copies itself, appends a Zstandard

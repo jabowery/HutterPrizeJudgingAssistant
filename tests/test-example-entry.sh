@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 readonly project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-readonly entry_dir="$project_dir/Entries/Example"
+readonly entry_dir="$project_dir/examples/well-formed-entry"
 readonly test_dir="$(mktemp -d)"
 trap 'rm -rf -- "$test_dir"' EXIT
 

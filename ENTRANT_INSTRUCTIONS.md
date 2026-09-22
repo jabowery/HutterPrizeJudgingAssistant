@@ -5,6 +5,10 @@ These instructions define the mechanical submission contract used by
 [official detailed rules](https://www.hutter1.net/prize/hrules.htm), while
 allowing different real filenames through explicit `entry.env` aliases.
 
+Keep the entry directory outside the judging-system Git repository. The
+repository contains a public fixture under `examples/well-formed-entry`, but
+that path is not a submission-storage namespace.
+
 ## 1. Choose one official entry form
 
 ### Self-extracting form
@@ -15,7 +19,7 @@ that archive with no arguments produces the declared output file.
 Illustrative Linux directory:
 
 ```text
-Entries/NAME/
+NAME/
 ├── entry.env
 ├── archive9
 └── comp9.tar.gz       # .tar, .tgz, or .zip is also accepted
@@ -24,7 +28,7 @@ Entries/NAME/
 Illustrative Windows directory:
 
 ```text
-Entries/NAME/
+NAME/
 ├── entry.env
 ├── archive9.exe
 └── comp9.zip
@@ -72,7 +76,7 @@ consumes that data and produces the declared output.
 Illustrative Linux directory:
 
 ```text
-Entries/NAME/
+NAME/
 ├── entry.env
 ├── decomp9
 ├── archive9.bhm
@@ -82,7 +86,7 @@ Entries/NAME/
 Illustrative Windows directory:
 
 ```text
-Entries/NAME/
+NAME/
 ├── entry.env
 ├── decomp9.exe
 ├── archive9.bhm
@@ -305,7 +309,8 @@ eligibility, and the spirit of the Prize.
 
 ## 9. Entrant preflight checklist
 
-- `entry.env` is at `Entries/NAME/entry.env` and names every submitted file.
+- `entry.env` is at the root of the external entry directory and names every
+  submitted file.
 - `QUALIFICATION_OS` names a supported catalog entry matching the intended
   build and runtime userspace.
 - Every filename is a basename and every alias matches the actual program's

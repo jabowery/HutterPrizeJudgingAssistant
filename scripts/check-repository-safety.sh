@@ -7,9 +7,10 @@ Usage:
   ./scripts/check-repository-safety.sh
   ./scripts/check-repository-safety.sh --pre-push REMOTE_NAME
 
-Reject tracked repository-local tmp/ content. In pre-push mode, read Git's
-pre-push updates from standard input and inspect every newly published commit,
-including commits in which tmp/ content was later deleted.
+Reject tracked repository-local tmp/ and Entries/ content. The public fixture
+lives under examples/, not in the submission namespace. In pre-push mode, read
+Git's pre-push updates from standard input and inspect every newly published
+commit, including commits in which prohibited content was later deleted.
 EOF
 }
 
@@ -43,6 +44,11 @@ cd -- "$repo_root"
 
 git check-ignore -q --no-index tmp/confidential-entry \
   || die "the repository-root tmp/ directory is not ignored"
+git check-ignore -q --no-index Entries/Confidential/archive9 \
+  || die "the legacy repository-root Entries/ directory is not ignored"
+if git check-ignore -q --no-index examples/well-formed-entry/entry.env; then
+  die "the public example fixture must remain eligible for version control"
+fi
 
 tracked_tmp="$(git ls-files -- tmp 'tmp/**')"
 if [[ -n "$tracked_tmp" ]]; then
@@ -51,6 +57,18 @@ if [[ -n "$tracked_tmp" ]]; then
   while read -r tracked_path; do
     [[ -n "$tracked_path" ]] && printf '  %s\n' "$tracked_path" >&2
   done <<<"$tracked_tmp"
+  exit 1
+fi
+
+tracked_entries="$(
+  git ls-files -- Entries 'Entries/**'
+)"
+if [[ -n "$tracked_entries" ]]; then
+  printf '%s\n' \
+    "error: repository-root Entries/ content is tracked or staged:" >&2
+  while read -r tracked_path; do
+    [[ -n "$tracked_path" ]] && printf '  %s\n' "$tracked_path" >&2
+  done <<<"$tracked_entries"
   exit 1
 fi
 
@@ -68,16 +86,27 @@ while read -r local_ref local_oid remote_ref remote_oid; do
 
   while read -r commit_oid; do
     [[ -n "$commit_oid" ]] || continue
-    disclosed_paths="$(
+    disclosed_tmp="$(
       git ls-tree -r --name-only "$commit_oid" -- tmp 'tmp/**'
     )"
-    if [[ -n "$disclosed_paths" ]]; then
+    disclosed_entries="$(
+      git ls-tree -r --name-only "$commit_oid" -- Entries
+    )"
+    if [[ -n "$disclosed_tmp$disclosed_entries" ]]; then
       printf '%s\n' \
-        "error: push rejected because outgoing commit $commit_oid contains repository-local tmp/ content:" >&2
-      while read -r disclosed_path; do
-        [[ -n "$disclosed_path" ]] \
-          && printf '  %s\n' "$disclosed_path" >&2
-      done <<<"$disclosed_paths"
+        "error: push rejected because outgoing commit $commit_oid contains prohibited local or contestant material:" >&2
+      if [[ -n "$disclosed_tmp" ]]; then
+        while read -r disclosed_path; do
+          [[ -n "$disclosed_path" ]] \
+            && printf '  %s\n' "$disclosed_path" >&2
+        done <<<"$disclosed_tmp"
+      fi
+      if [[ -n "$disclosed_entries" ]]; then
+        while read -r disclosed_path; do
+          [[ -n "$disclosed_path" ]] \
+            && printf '  %s\n' "$disclosed_path" >&2
+        done <<<"$disclosed_entries"
+      fi
       printf '%s\n' \
         "Remove the content from the commit history before pushing; deleting it in a later commit is insufficient." >&2
       exit 1

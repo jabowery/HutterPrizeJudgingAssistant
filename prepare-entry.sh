@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$script_dir/lib/entry-env.sh"
+source "$script_dir/lib/entry-location.sh"
 image=""
 entry_dir=""
 output_dir=""
@@ -33,6 +34,9 @@ Safely unpack the source package named by ENTRY_DIR/entry.env. The package
 must contain one top-level directory holding install.sh, build.sh, the declared
 argument file(s), and the complete source. The normalized prepared directory
 is printed on stdout. No filename is inferred by the orchestrator.
+
+ENTRY_DIR must be outside this repository. The sole exception is the public
+examples/well-formed-entry procedural fixture.
 
 Options:
   --output DIR       Required new directory for prepared source
@@ -70,6 +74,8 @@ done
 [[ -d "$entry_dir" && ! -L "$entry_dir" ]] || die "invalid entry directory: $entry_dir"
 [[ ! -e "$output_dir" && ! -L "$output_dir" ]] || die "output already exists: $output_dir"
 entry_dir="$(realpath -- "$entry_dir")"
+hp_entry_location_require_external_or_fixture "$script_dir" "$entry_dir" \
+  || exit 2
 hp_manifest_load "$entry_dir/entry.env" || exit 2
 hp_manifest_require_linux || exit 2
 image="${image:-$(hp_qualification_os_image_tag "$HP_QUALIFICATION_OS")}" \

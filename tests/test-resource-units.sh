@@ -33,4 +33,15 @@ assistance_help="$($project_dir/judging_assistance.sh --help)"
 [[ "$assistance_help" == *"process-tree (default)"* ]]
 [[ "$assistance_help" == *"automatic ./Work"* ]]
 
+initial_capacity_line="$(grep -n '^check_work_capacity || die ' \
+  "$project_dir/judging_assistance.sh" | cut -d: -f1)"
+common_image_line="$(grep -n '^echo "Building the common judging image' \
+  "$project_dir/judging_assistance.sh" | cut -d: -f1)"
+post_dependency_capacity_line="$(grep -n '^check_work_capacity \\' \
+  "$project_dir/judging_assistance.sh" | cut -d: -f1)"
+compressor_build_line="$(grep -n 'if ! "$script_dir/build-compressor.sh"' \
+  "$project_dir/judging_assistance.sh" | cut -d: -f1)"
+(( initial_capacity_line < common_image_line ))
+(( post_dependency_capacity_line < compressor_build_line ))
+
 echo "resource unit format tests passed"

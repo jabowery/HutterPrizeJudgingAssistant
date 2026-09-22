@@ -45,6 +45,7 @@ FAKE_SUDO_LOG="$test_dir/judging-sudo.log" \
   PATH="$test_dir/bin:$PATH" \
   "$project_dir/judging_assistance.sh" \
     --cold-cache \
+    --serial \
     --expected-size "$(stat --format='%s' "$test_dir/enwik9")" \
     --work-root "$test_dir/judging-work" \
     --results "$test_dir/judging-results" \

@@ -11,7 +11,7 @@ fail() {
 }
 
 expect_usage_error() {
-  local name="$1"
+  local name="${1//\//-}"
   shift
   local stdout_file="$test_root/$name.stdout"
   local stderr_file="$test_root/$name.stderr"
@@ -31,7 +31,7 @@ expect_usage_error() {
 }
 
 expect_help() {
-  local name="$1"
+  local name="${1//\//-}"
   local script="$2"
   local stdout_file="$test_root/$name.help.stdout"
   local stderr_file="$test_root/$name.help.stderr"
@@ -55,6 +55,9 @@ readonly -a scripts=(
   host-security-preflight.sh
   install-host-dependencies.sh
   cold-cache-host-helper.sh
+  provision-gcp-instance.sh
+  launch-cloud-judging.sh
+  scripts/run-in-tmux.sh
 )
 
 for script in "${scripts[@]}"; do
@@ -77,6 +80,10 @@ expect_usage_error host-security-preflight-missing \
   "$project_dir/host-security-preflight.sh"
 expect_usage_error cold-cache-helper-missing \
   "$project_dir/cold-cache-host-helper.sh"
+expect_usage_error cloud-launch-missing \
+  "$project_dir/launch-cloud-judging.sh"
+expect_usage_error tmux-runner-missing \
+  "$project_dir/scripts/run-in-tmux.sh"
 expect_usage_error benchmark-invalid-qualification-os \
   "$project_dir/benchmark.sh" --qualification-os not-in-the-catalog
 
@@ -84,10 +91,10 @@ expect_usage_error qualify-archive-entry-path \
   "$project_dir/qualify-archive.sh" \
     --preflight-only \
     --expected-size 1 \
-    --entry Entries/Wolk/cmix-neif-pre3/ \
+    --entry Parent/Child/ \
     --executable archive9 \
     --output enwik9_decompressed \
-    "$project_dir/Entries/Example"
+    "$project_dir/examples/well-formed-entry"
 grep -q -- '--entry requires a child name without slashes' \
   "$test_root/qualify-archive-entry-path.stderr" \
   || fail "qualification diagnostic did not distinguish a child name from a path"
@@ -96,7 +103,7 @@ manifest_results="$test_root/manifest-results"
 bash "$project_dir/qualify-archive.sh" \
   --preflight-only \
   --results "$manifest_results" \
-  "$project_dir/Entries/Example" \
+  "$project_dir/examples/well-formed-entry" \
   >"$test_root/manifest.stdout" 2>"$test_root/manifest.stderr" \
   || fail "qualification did not accept the entry.env defaults"
 manifest_preflight="$(find "$manifest_results" -name preflight.env -type f -print -quit)"

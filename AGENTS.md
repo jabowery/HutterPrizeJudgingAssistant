@@ -1,5 +1,5 @@
 # Objective
-Create a Docker-based system that, given an `Entries/` subdirectory, automates
+Create a Docker-based system that, given an external entry directory, automates
 the technical evaluation required for Hutter Prize judging to the greatest
 degree practicable while minimizing the likelihood that an adversarial entry
 can escape its container and compromise the host.
@@ -24,9 +24,9 @@ worker.
 The detailed judging rules are at:
 http://prize.hutter1.net/hrules.htm
 
-An example subdirectory is Entries/Example/
+The public example fixture is `examples/well-formed-entry/`.
 
-Note the files in that example directory:
+Note the files in that fixture directory:
 
 - `archive9` is an executable archive of `enwik9` used to exercise the judging
   system.
@@ -37,3 +37,9 @@ Note the files in that example directory:
 This directory is a purpose-built procedural fixture with no derivation from a
 Hutter Prize submission. It exists only to exercise the ordinary judging flow
 quickly and must not be represented as a competitive Hutter Prize result.
+
+Real contestant material must remain outside the repository. The legacy
+repository-root `Entries/` path is ignored and prohibited from version control;
+operator-facing workflows must reject a real entry located anywhere inside the
+repository. Entrant artifacts are transferred through explicit, separate
+handoffs rather than as part of a judging-system source snapshot.

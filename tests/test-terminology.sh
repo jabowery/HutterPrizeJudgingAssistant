@@ -12,7 +12,6 @@ while IFS= read -r occurrence; do
   esac
 done < <(
   git -C "$project_dir" grep -nI -i 'judge' -- . \
-    ':(exclude)Entries/**' \
     ':(exclude)tests/test-terminology.sh' || true
 )
 
