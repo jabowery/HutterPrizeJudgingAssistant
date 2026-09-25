@@ -53,6 +53,114 @@ hp_cgroup_peak_source() {
   fi
 }
 
+hp_read_cgroup_current() {
+  if [[ -r /sys/fs/cgroup/memory.current ]]; then
+    tr -d '\r\n' < /sys/fs/cgroup/memory.current
+    return
+  fi
+  if [[ -r /sys/fs/cgroup/memory/memory.usage_in_bytes ]]; then
+    tr -d '\r\n' < /sys/fs/cgroup/memory/memory.usage_in_bytes
+    return
+  fi
+  printf 'unavailable\n'
+}
+
+hp_read_cgroup_cpu_usage_usec() {
+  local usage_usec
+  if [[ -r /sys/fs/cgroup/cpu.stat ]]; then
+    usage_usec="$(awk '$1 == "usage_usec" { print $2 }' /sys/fs/cgroup/cpu.stat)"
+    [[ "$usage_usec" =~ ^[0-9]+$ ]] && {
+      printf '%s\n' "$usage_usec"
+      return
+    }
+  fi
+  if [[ -r /sys/fs/cgroup/cpuacct/cpuacct.usage ]]; then
+    usage_usec="$(tr -d '\r\n' < /sys/fs/cgroup/cpuacct/cpuacct.usage)"
+    if [[ "$usage_usec" =~ ^[0-9]+$ ]]; then
+      printf '%s\n' "$((usage_usec / 1000))"
+      return
+    fi
+  fi
+  printf 'unavailable\n'
+}
+
+hp_format_gib_runtime() {
+  LC_ALL=C awk -v bytes="$1" '
+    BEGIN {
+      value = sprintf("%.10f", bytes / 1073741824)
+      sub(/0+$/, "", value)
+      sub(/[.]$/, "", value)
+      printf "%s GiB", value
+    }
+  '
+}
+
+hp_format_gb_runtime() {
+  LC_ALL=C awk -v bytes="$1" '
+    BEGIN {
+      value = sprintf("%.9f", bytes / 1000000000)
+      sub(/0+$/, "", value)
+      sub(/[.]$/, "", value)
+      printf "%s GB", value
+    }
+  '
+}
+
+hp_format_hms_runtime() {
+  local total_seconds="$1"
+  local hours minutes seconds
+  hours="$((10#$total_seconds / 3600))"
+  minutes="$(((10#$total_seconds % 3600) / 60))"
+  seconds="$((10#$total_seconds % 60))"
+  printf '%02d:%02d:%02d' "$hours" "$minutes" "$seconds"
+}
+
+hp_emit_runtime_status() {
+  local start_epoch="$1"
+  local deadline_epoch="$2"
+  local disk_bytes="$3"
+  local disk_limit_bytes="$4"
+  local cgroup_limit_bytes="$5"
+  local output_path="$6"
+  local cgroup_cpu_start_usec="$7"
+  local now_epoch elapsed_seconds remaining_seconds cgroup_current cgroup_cpu_current_usec
+  local cpu_elapsed_seconds output_state
+
+  now_epoch="$(date +%s)"
+  elapsed_seconds="$((now_epoch - start_epoch))"
+  (( elapsed_seconds >= 0 )) || elapsed_seconds=0
+  remaining_seconds="$((deadline_epoch - now_epoch))"
+  (( remaining_seconds >= 0 )) || remaining_seconds=0
+  cgroup_current="$(hp_read_cgroup_current)"
+  if [[ "$cgroup_current" =~ ^[0-9]+$ ]]; then
+    cgroup_current="$(hp_format_gib_runtime "$cgroup_current")"
+  fi
+  cgroup_cpu_current_usec="$(hp_read_cgroup_cpu_usage_usec)"
+  if [[ "$cgroup_cpu_start_usec" =~ ^[0-9]+$ \
+      && "$cgroup_cpu_current_usec" =~ ^[0-9]+$ ]]; then
+    cpu_elapsed_seconds="$(((cgroup_cpu_current_usec - cgroup_cpu_start_usec) / 1000000))"
+    (( cpu_elapsed_seconds >= 0 )) || cpu_elapsed_seconds=0
+    cgroup_cpu_current_usec="$(hp_format_hms_runtime "$cpu_elapsed_seconds")"
+  else
+    cgroup_cpu_current_usec=unavailable
+  fi
+  if [[ -f "$output_path" && ! -L "$output_path" ]]; then
+    output_state="$(basename -- "$output_path")=$(stat --format='%s' -- "$output_path") bytes"
+  else
+    output_state="$(basename -- "$output_path")=not-created"
+  fi
+
+  printf 'STATUS: wall-elapsed=%s wall-remaining=%s cpu-used=%s disk=%s/%s cgroup-current=%s/%s output=%s\n' \
+    "$(hp_format_hms_runtime "$elapsed_seconds")" \
+    "$(hp_format_hms_runtime "$remaining_seconds")" \
+    "$cgroup_cpu_current_usec" \
+    "$(hp_format_gb_runtime "$disk_bytes")" \
+    "$(hp_format_gb_runtime "$disk_limit_bytes")" \
+    "$cgroup_current" \
+    "$(hp_format_gib_runtime "$cgroup_limit_bytes")" \
+    "$output_state" >&2
+}
+
 hp_gnu_time_elapsed_seconds() {
   local hp_rr_time_file="$1"
   awk -F': ' '

@@ -131,6 +131,15 @@ handled:
 5. Configures tmux for 100000 lines of scrollback and starts the run in a
    detached session whose output is also written to a log.
 
+While a compression or decompression invocation is running, the trusted
+runtime supervisor writes one status line per minute to the tmux session and
+its log. It reports wall elapsed and remaining allowance for cost tracking,
+cumulative cgroup CPU time for estimating the entry's likely outcome under the
+Geekbench adjustment, allocated work storage, current cgroup memory, and the
+declared output artifact's current size. This is operational telemetry, not a
+claimed codec-completion percentage. The formal process-tree peak-RSS result
+remains the post-run measurement recorded in the evidence.
+
 The 200 GB boot-disk default is intentional. The worker must still have the
 full 100 GB run allowance free after the operating system, Docker images,
 dependency layers, repository, inputs, and retained evidence have consumed

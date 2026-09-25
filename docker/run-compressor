@@ -9,6 +9,7 @@ readonly time_limit_seconds="${TIME_LIMIT_SECONDS:?TIME_LIMIT_SECONDS is require
 readonly memory_limit_bytes="${MEMORY_LIMIT_BYTES:-10737418240}"
 readonly disk_limit_bytes="${DISK_LIMIT_BYTES:-100000000000}"
 readonly disk_poll_seconds="${DISK_POLL_SECONDS:-10}"
+readonly status_interval_seconds=60
 readonly report_dir=/work/report
 readonly run_dir=/work/run
 readonly executable_name="${EXECUTABLE_NAME:?EXECUTABLE_NAME is required}"
@@ -71,6 +72,7 @@ cd "$run_dir"
 mapfile -t executable_arguments < "$run_dir/$arguments_name"
 
 hp_open_monitor_descriptors "$report_dir"
+cgroup_cpu_start_usec="$(hp_read_cgroup_cpu_usage_usec)"
 set +e
 /usr/bin/time --verbose --output="$report_dir/time.txt" \
   /opt/contestant-root/bin/exec-once "$runtime_exec_policy" \
@@ -85,6 +87,7 @@ peak_apparent_bytes=0
 resource_violation=none
 time_limit_exceeded=no
 time_limit_exceeded_epoch=not_exceeded
+last_status_epoch=0
 
 mark_time_limit_exceeded() {
   local completion_state="$1"
@@ -120,6 +123,15 @@ while kill -0 "$timed_pid" 2>/dev/null; do
   current_apparent_bytes="${current_apparent_bytes:-0}"
   (( current_disk_bytes > peak_disk_bytes )) && peak_disk_bytes="$current_disk_bytes"
   (( current_apparent_bytes > peak_apparent_bytes )) && peak_apparent_bytes="$current_apparent_bytes"
+
+  current_status_epoch="$(date +%s)"
+  if (( current_status_epoch - last_status_epoch >= status_interval_seconds )); then
+    hp_emit_runtime_status \
+      "$start_epoch" "$((deadline_epoch_nanoseconds / 1000000000))" \
+      "$current_disk_bytes" "$disk_limit_bytes" "$MEMORY_LIMIT_BYTES" \
+      "$run_dir/$output_name" "$cgroup_cpu_start_usec"
+    last_status_epoch="$current_status_epoch"
+  fi
 
   if (( current_disk_bytes > disk_limit_bytes )); then
     resource_violation=disk

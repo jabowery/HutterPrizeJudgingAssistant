@@ -20,6 +20,26 @@ source "$project_dir/lib/resource-units.sh"
 [[ "$(hp_format_hms 159191)" == "44:13:11" ]]
 [[ "$(hp_format_hms 360000)" == "100:00:00" ]]
 
+source "$project_dir/docker/runtime-report"
+[[ "$(hp_format_gib_runtime 10737418240)" == "10 GiB" ]]
+[[ "$(hp_format_gb_runtime 100000000000)" == "100 GB" ]]
+[[ "$(hp_format_hms_runtime 360000)" == "100:00:00" ]]
+runtime_status_start="$(date +%s)"
+runtime_status_line="$(hp_emit_runtime_status \
+  "$runtime_status_start" "$((runtime_status_start + 60))" \
+  14000000000 100000000000 17179869184 /tmp/hutter-output-does-not-exist unavailable \
+  2>&1)"
+[[ "$runtime_status_line" == STATUS:*wall-elapsed=*wall-remaining=*cpu-used=unavailable* ]] \
+  || { echo "runtime status did not distinguish wall and CPU time" >&2; exit 1; }
+[[ "$runtime_status_line" == *disk=14\ GB/100\ GB* ]] \
+  || { echo "runtime status did not report disk allocation" >&2; exit 1; }
+[[ "$runtime_status_line" == *'output=hutter-output-does-not-exist=not-created' ]] \
+  || { echo "runtime status did not report output state" >&2; exit 1; }
+grep -q '^readonly status_interval_seconds=60$' \
+  "$project_dir/docker/run-compressor"
+grep -q '^readonly status_interval_seconds=60$' \
+  "$project_dir/docker/run-archive"
+
 qualify_help="$($project_dir/qualify-archive.sh --help)"
 [[ "$qualify_help" == *"default: 10 GiB"* ]]
 [[ "$qualify_help" == *"default: 100 GB"* ]]
