@@ -36,6 +36,7 @@ runtime_exec_policy=process-tree
 record_size=110793128
 preflight_only=false
 skip_build=false
+skip_storage_preflight=false
 keep_work=false
 container_id_file=""
 cold_cache=false
@@ -85,6 +86,7 @@ Options:
   --image NAME               Override the catalog-derived local image tag
   --qualification-os NAME    Override manifest OS (fallback: ubuntu-22.04)
   --skip-build               Use an existing image
+  --skip-storage-preflight   Internal parent-orchestrator handoff
   --preflight-only           Inventory and score without executing submissions
   --keep-work                Keep per-entry Docker volumes for inspection
   --container-id-file FILE   Internal active-container handoff for parent cleanup
@@ -298,6 +300,10 @@ while (( $# > 0 )); do
       ;;
     --skip-build)
       skip_build=true
+      shift
+      ;;
+    --skip-storage-preflight)
+      skip_storage_preflight=true
       shift
       ;;
     --preflight-only)
@@ -536,6 +542,13 @@ if [[ "$preflight_only" != true ]]; then
   [[ -w "$work_root" ]] || die "work root is not writable: $work_root"
   work_root="$(realpath -- "$work_root")"
   work_filesystem_path="$work_root"
+
+  if [[ "$skip_storage_preflight" != true ]]; then
+    echo "Measuring trusted storage preflight..." >&2
+    "$script_dir/storage-preflight.sh" --image "$image" \
+      --work-root "$work_root" --results "$run_results" \
+      || die "trusted host/container storage comparison failed"
+  fi
 
   if [[ "$cold_cache" == true ]]; then
     hp_cold_cache_validate_work_root "$work_root" || exit 2

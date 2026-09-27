@@ -9,7 +9,7 @@ hp_host_dependencies_ensure() {
   local -a missing=()
 
   for command_name in \
-      docker git curl flock realpath sha256sum stat df find sort awk sed timeout; do
+      docker fio git jq curl flock realpath sha256sum stat df find sort awk sed timeout; do
     command -v "$command_name" >/dev/null 2>&1 || missing+=("$command_name")
   done
   if command -v git >/dev/null 2>&1 \
@@ -31,7 +31,7 @@ hp_host_dependencies_ensure() {
   fi
 
   for command_name in \
-      docker git curl flock realpath sha256sum stat df find sort awk sed timeout; do
+      docker fio git jq curl flock realpath sha256sum stat df find sort awk sed timeout; do
     command -v "$command_name" >/dev/null 2>&1 || {
       printf 'error: host dependency installation did not provide %s\n' \
         "$command_name" >&2

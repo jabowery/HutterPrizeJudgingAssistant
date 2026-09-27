@@ -401,6 +401,13 @@ image="${image:-$(hp_qualification_os_image_tag "$qualification_os")}" \
 hp_qualification_os_build "$qualification_os" "$image" "$script_dir" >&2 \
   || stage_fail common_image "Docker image build failed"
 
+echo "Measuring trusted storage preflight..." >&2
+if ! "$script_dir/storage-preflight.sh" \
+    --image "$image" --work-root "$work_root" \
+    --results "$run_results"; then
+  stage_fail storage_preflight "trusted host/container storage comparison failed"
+fi
+
 if [[ "$cold_cache" == true ]]; then
   cold_cache_helper="$run_results/trusted-tools/mincore-residency"
   if ! hp_cold_cache_extract_mincore_helper "$image" "$cold_cache_helper"; then
@@ -459,7 +466,7 @@ if [[ -z "$geekbench_score" ]]; then
   geekbench_score="$("$script_dir/benchmark.sh" \
     --skip-build --image "$image" \
     --qualification-os "$qualification_os" \
-    --results "$run_results/calibration")" \
+    --results "$run_results/calibration" --skip-storage-preflight)" \
     || stage_fail geekbench "automatic calibration failed"
 fi
 time_limit_seconds="$(awk -v score="$geekbench_score" \
@@ -515,7 +522,7 @@ else
     fi
   fi
 
-  qualification_command=("$script_dir/qualify-archive.sh" --skip-build
+  qualification_command=("$script_dir/qualify-archive.sh" --skip-build --skip-storage-preflight
     --container-id-file "$qualification_container_file"
     --results "$run_results/submitted-decompression"
     --output "$decompressed_output" "${common_limits[@]}")
@@ -652,7 +659,7 @@ else
   else
     echo "[$entry_name] generated artifacts require a fresh decompression" >&2
   fi
-  generated_qualification=("$script_dir/qualify-archive.sh" --skip-build
+  generated_qualification=("$script_dir/qualify-archive.sh" --skip-build --skip-storage-preflight
     --results "$run_results/generated-decompression"
     --output "$decompressed_output" "${common_limits[@]}")
   if [[ "$HP_ENTRY_FORMAT" == self-extracting ]]; then

@@ -9,7 +9,9 @@ source "$script_dir/lib/host-dependencies.sh"
 image=""
 qualification_os="$HP_DEFAULT_QUALIFICATION_OS"
 results_path="$script_dir/Results"
+work_root=""
 skip_build=false
+skip_storage_preflight=false
 results_path_created=false
 run_results=""
 result_dir=""
@@ -27,7 +29,9 @@ Options:
   --image NAME               Override the catalog-derived local image tag
   --qualification-os NAME    Trusted catalog alias
   --results DIR              Evidence directory (default: ./Results)
+  --work-root DIR            Storage-preflight filesystem (default: ./Work)
   --skip-build               Reuse an existing image
+  --skip-storage-preflight   Internal parent-orchestrator handoff
   -h, --help                 Show this help
 EOF
 }
@@ -84,7 +88,9 @@ while (( $# > 0 )); do
     --image) (( $# >= 2 )) || usage_error "$1 requires a value"; image="$2"; shift 2 ;;
     --qualification-os) (( $# >= 2 )) || usage_error "$1 requires a value"; qualification_os="$2"; shift 2 ;;
     --results) (( $# >= 2 )) || usage_error "$1 requires a value"; results_path="$2"; shift 2 ;;
+    --work-root) (( $# >= 2 )) || usage_error "$1 requires a value"; work_root="$2"; shift 2 ;;
     --skip-build) skip_build=true; shift ;;
+    --skip-storage-preflight) skip_storage_preflight=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage_error "unknown argument: $1" ;;
   esac
@@ -112,6 +118,17 @@ run_results="$results_path/$stamp"
 result_dir="$run_results/geekbench5"
 mkdir -p -- "$result_dir"
 readonly log_file="$result_dir/geekbench.log"
+
+if [[ "$skip_storage_preflight" != true ]]; then
+  work_root="${work_root:-$script_dir/Work}"
+  mkdir -p -- "$work_root" || die "could not create storage-preflight work root"
+  [[ -d "$work_root" && ! -L "$work_root" && -w "$work_root" ]] \
+    || die "invalid storage-preflight work root: $work_root"
+  echo "Measuring trusted storage preflight..." >&2
+  "$script_dir/storage-preflight.sh" --image "$image" \
+    --work-root "$work_root" --results "$run_results" \
+    || die "trusted host/container storage comparison failed"
+fi
 
 echo "Running trusted Geekbench calibration with temporary network access..." >&2
 set +e

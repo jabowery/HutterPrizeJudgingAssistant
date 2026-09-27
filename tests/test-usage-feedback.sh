@@ -55,6 +55,7 @@ readonly -a scripts=(
   host-security-preflight.sh
   install-host-dependencies.sh
   cold-cache-host-helper.sh
+  storage-preflight.sh
   provision-gcp-instance.sh
   launch-cloud-judging.sh
   cloud/fetch-enwik9.sh

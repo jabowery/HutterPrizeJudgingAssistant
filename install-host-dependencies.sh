@@ -33,7 +33,7 @@ command -v apt-get >/dev/null \
 export DEBIAN_FRONTEND=noninteractive
 
 packages=(
-  bash ca-certificates coreutils curl findutils git git-lfs grep mawk sed util-linux
+  bash ca-certificates coreutils curl findutils fio git git-lfs grep jq mawk sed util-linux
 )
 if ! command -v docker >/dev/null 2>&1; then
   packages+=(apparmor docker.io)

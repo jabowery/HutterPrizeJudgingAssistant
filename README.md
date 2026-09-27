@@ -482,6 +482,20 @@ machine-readable evidence retains exact integer bytes and seconds. CPU
 capacity, wall time, disk allocation, container inspection, logs, hashes, and
 image IDs are retained under `Results/`.
 
+Before a formal `judging_assistance.sh` workflow begins, the system runs its
+trusted `storage-preflight.sh` on the selected work filesystem. It uses a
+published `fio` profile to compare direct host access with the same file
+through the assistant's bind-mounted Docker path. The retained report includes
+raw JSON, filesystem/device and Docker storage-driver identity, and
+host/container median and p99 latency ratios for 4 KiB direct random reads and
+buffered mmap random access. This establishes the actual storage-path evidence
+for the run; it is not a storage handicap or a claim that all container paths
+perform identically.
+
+The standalone `benchmark.sh` and `qualify-archive.sh` workflows perform the
+same preflight by default. Parent workflows run it once at their outermost
+level rather than repeating it for each child phase.
+
 Crossing the wall-time allowance immediately records `FAIL_TIME` and prints a
 notice to the operator, but does not terminate the compressor or decompressor.
 The isolated process tree continues to completion so its behavior and resource

@@ -23,7 +23,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
-         ca-certificates curl libarchive-tools time util-linux \
+         ca-certificates curl fio libarchive-tools time util-linux \
     && rm -rf /var/lib/apt/lists/*
 
 COPY docker/init-work /usr/local/bin/init-work

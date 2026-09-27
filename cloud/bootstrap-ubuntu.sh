@@ -45,7 +45,7 @@ apt-get update
 apt-get dist-upgrade --yes
 apt-get install --yes --no-install-recommends \
   apparmor bash ca-certificates coreutils curl diffutils docker.io file \
-  findutils git git-lfs grep gzip mawk openssh-client psmisc sed tar tmux \
+  findutils fio git git-lfs grep gzip jq mawk openssh-client psmisc sed tar tmux \
   unzip util-linux
 
 if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
