@@ -272,7 +272,12 @@ else
   status=PASS
 fi
 
-if [[ "$status" == PASS ]]; then
+archive_retained=no
+# A completed archive from a late run is not score-eligible, but retaining it
+# is the reason a timed-out execution is permitted to continue.  It lets the
+# operator inspect the eventual artifact without paying to repeat the run.
+if [[ "$archive_status" == found \
+    && ( "$status" == PASS || "$status" == FAIL_TIME ) ]]; then
   if [[ -z "$output_path" ]]; then
     output_path="$result_dir/$HP_ARCHIVE"
   fi
@@ -280,6 +285,7 @@ if [[ "$status" == PASS ]]; then
   docker cp "$active_container:/work/run/$HP_ARCHIVE" "$output_path"
   chmod 0555 "$output_path"
   output_path="$(realpath -- "$output_path")"
+  archive_retained=yes
 fi
 
 {
@@ -310,10 +316,16 @@ fi
   echo "command_line_bytes=$(stat --format='%s' "$entry_dir/$HP_COMPRESSOR_ARGUMENTS")"
   echo "command_line_sha256=$(sha256sum "$entry_dir/$HP_COMPRESSOR_ARGUMENTS" | awk '{print $1}')"
   echo "archive_path=$output_path"
-  [[ "$status" != PASS ]] || echo "archive_bytes=$(stat --format='%s' "$output_path")"
-  [[ "$status" != PASS ]] || echo "archive_sha256=$(sha256sum "$output_path" | awk '{print $1}')"
+  echo "archive_retained=$archive_retained"
+  if [[ "$archive_retained" == yes ]]; then
+    echo "archive_bytes=$(stat --format='%s' "$output_path")"
+    echo "archive_sha256=$(sha256sum "$output_path" | awk '{print $1}')"
+  fi
 } > "$result_dir/compression.env"
 
 echo "[$entry_name] compression $status" >&2
+if [[ "$status" == FAIL_TIME && "$archive_retained" == yes ]]; then
+  echo "[$entry_name] retained late, unqualified archive: $output_path" >&2
+fi
 [[ "$status" == PASS ]] || exit 1
 printf '%s\n' "$output_path"

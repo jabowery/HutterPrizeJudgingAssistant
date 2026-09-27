@@ -134,9 +134,10 @@ handled:
 While a compression or decompression invocation is running, the trusted
 runtime supervisor writes one status line per minute to the tmux session and
 its log. It reports wall elapsed and remaining allowance for cost tracking,
-cumulative cgroup CPU time for estimating the entry's likely outcome under the
-Geekbench adjustment, allocated work storage, current cgroup memory, and the
-declared output artifact's current size. This is operational telemetry, not a
+cumulative cgroup CPU time as utilization telemetry, allocated work storage,
+current cgroup memory, and the declared output artifact's current size. Use
+wall elapsed—not CPU time—when projecting whether an entry can finish within
+its Geekbench-adjusted time allowance. This is operational telemetry, not a
 claimed codec-completion percentage. The formal process-tree peak-RSS result
 remains the post-run measurement recorded in the evidence.
 
@@ -484,7 +485,10 @@ image IDs are retained under `Results/`.
 Crossing the wall-time allowance immediately records `FAIL_TIME` and prints a
 notice to the operator, but does not terminate the compressor or decompressor.
 The isolated process tree continues to completion so its behavior and resource
-use remain observable. The operator may press Ctrl-C to terminate it; the
+use remain observable. If a late compressor eventually creates its declared
+archive, the system copies it to the requested output location and records it
+as a retained, **unqualified** artifact; it is not scored or passed to the
+decompression phase. The operator may press Ctrl-C to terminate it; the
 orchestrator then force-removes the active container and cleans its work area.
 Memory and disk violations remain terminating conditions.
 

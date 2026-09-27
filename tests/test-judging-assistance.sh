@@ -551,6 +551,9 @@ grep -q '^status=FAIL_TIME$' "$slow_compression_env"
 grep -q '^time_limit_exceeded=yes$' "$slow_compression_env"
 grep -qx 0 "$slow_compression_code"
 grep -qx found "$slow_compression_output"
+grep -q '^archive_retained=yes$' "$slow_compression_env"
+slow_compression_archive="$(sed -n 's/^archive_path=//p' "$slow_compression_env")"
+[[ -x "$slow_compression_archive" ]]
 grep -q 'FAIL_TIME: comp9 exceeded its 1-second allowance and remains running' \
   "$slow_compression_log"
 
