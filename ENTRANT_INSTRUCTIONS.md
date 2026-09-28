@@ -138,6 +138,7 @@ For either form, x86 uses `linux-x86` or `windows-x86`; x86-64 uses
 It is never shell-evaluated. Each non-comment line is exactly `KEY=VALUE`.
 Values naming files must be basenames made from letters, digits, `.`, `_`, and
 `-`; paths, quoting, substitutions, and duplicate/unknown fields are rejected.
+The sole transport exception is an HTTPS URL in `ARCHIVE`, described below.
 
 The aliases have precise roles:
 
@@ -151,6 +152,15 @@ The aliases have precise roles:
   current working directory and the exact basename used during compression.
 - `COMPRESSOR_ARGUMENTS`: argument-vector file inside the source package.
 - `ARCHIVE`: exact compressor output and initially submitted archive basename.
+  For cloud transfer, it may instead be an HTTPS URL whose path ends in that
+  basename, for example `ARCHIVE=https://files.example.org/archive9`. The
+  trusted cloud launcher downloads it directly to that derived basename; it
+  does not send the archive through the operator's machine. This URL form is
+  for the initially submitted artifact only—`build.sh` still produces the
+  basename.
+- `ARCHIVE_SHA256`: optional lowercase SHA-256 digest of an HTTPS `ARCHIVE`.
+  When supplied, the cloud launcher rejects a download whose bytes do not
+  match. The launcher always records the digest it actually downloaded.
 - `DECOMPRESSOR`: exact rebuilt and initially submitted decompressor basename
   for the Relaxations form.
 - `DECOMPRESSOR_ARGUMENTS`: decompressor argument-vector file in the package.

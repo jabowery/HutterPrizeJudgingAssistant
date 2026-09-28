@@ -23,6 +23,25 @@ hp_manifest_basename() {
   fi
 }
 
+hp_manifest_archive_url() {
+  local value="$1" remainder host path filename
+  [[ "$value" == https://* && "$value" != *$'\n'* && "$value" != *$'\r'* \
+      && "$value" != *' '* && "$value" != *$'\t'* ]] \
+    || { hp_manifest_die "ARCHIVE URL must be a single-line HTTPS URL"; return; }
+  remainder="${value#https://}"
+  [[ "$remainder" == */* ]] \
+    || { hp_manifest_die "ARCHIVE URL must contain a path ending in its filename"; return; }
+  host="${remainder%%/*}"
+  [[ "$host" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]+)?$ ]] \
+    || { hp_manifest_die "ARCHIVE URL has an invalid HTTPS host"; return; }
+  path="/${remainder#*/}"
+  path="${path%%[?#]*}"
+  filename="${path##*/}"
+  hp_manifest_basename ARCHIVE "$filename" || return
+  HP_ARCHIVE_URL="$value"
+  HP_ARCHIVE="$filename"
+}
+
 hp_arguments_validate() {
   local arguments="$1" label="${2:-argument file}" final_byte
   [[ -f "$arguments" && ! -L "$arguments" ]] \
@@ -56,6 +75,8 @@ hp_manifest_load() {
   HP_COMPRESSOR_FORMAT=
   HP_COMPRESSOR_ARGUMENTS=
   HP_ARCHIVE=
+  HP_ARCHIVE_URL=
+  HP_ARCHIVE_SHA256=
   HP_ARCHIVE_FORMAT=
   HP_DECOMPRESSED_OUTPUT=
   HP_DECOMPRESSOR=
@@ -84,6 +105,7 @@ hp_manifest_load() {
       COMPRESSOR_FORMAT) HP_COMPRESSOR_FORMAT="$value" ;;
       COMPRESSOR_ARGUMENTS) HP_COMPRESSOR_ARGUMENTS="$value" ;;
       ARCHIVE) HP_ARCHIVE="$value" ;;
+      ARCHIVE_SHA256) HP_ARCHIVE_SHA256="$value" ;;
       ARCHIVE_FORMAT) HP_ARCHIVE_FORMAT="$value" ;;
       DECOMPRESSED_OUTPUT) HP_DECOMPRESSED_OUTPUT="$value" ;;
       DECOMPRESSOR) HP_DECOMPRESSOR="$value" ;;
@@ -118,10 +140,17 @@ hp_manifest_load() {
     value="HP_$required"
     [[ -n "${!value}" ]] || { hp_manifest_die "missing $required"; return; }
     case "$required" in
-      COMPRESSOR_FORMAT|ARCHIVE_FORMAT) ;;
+      COMPRESSOR_FORMAT|ARCHIVE_FORMAT|ARCHIVE) ;;
       *) hp_manifest_basename "$required" "${!value}" || return ;;
     esac
   done
+  if [[ "$HP_ARCHIVE" == https://* ]]; then
+    hp_manifest_archive_url "$HP_ARCHIVE" || return
+  else
+    hp_manifest_basename ARCHIVE "$HP_ARCHIVE" || return
+  fi
+  [[ -z "$HP_ARCHIVE_SHA256" || "$HP_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]] \
+    || { hp_manifest_die "ARCHIVE_SHA256 must be a lowercase SHA-256 digest"; return; }
   case "$HP_COMPRESSOR_FORMAT" in executable|upx|upx-overlay) ;;
     *) hp_manifest_die "COMPRESSOR_FORMAT must be executable, upx, or upx-overlay" || return ;;
   esac
@@ -149,7 +178,7 @@ hp_manifest_load() {
 
   export HP_ENTRY_FORMAT HP_EXECUTION_PLATFORM HP_QUALIFICATION_OS HP_SOURCE_PACKAGE \
     HP_COMPRESSOR HP_COMPRESSOR_FORMAT HP_COMPRESSOR_ARGUMENTS \
-    HP_ARCHIVE HP_ARCHIVE_FORMAT HP_DECOMPRESSED_OUTPUT \
+    HP_ARCHIVE HP_ARCHIVE_URL HP_ARCHIVE_SHA256 HP_ARCHIVE_FORMAT HP_DECOMPRESSED_OUTPUT \
     HP_DECOMPRESSOR HP_DECOMPRESSOR_FORMAT HP_DECOMPRESSOR_ARGUMENTS
 }
 

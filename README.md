@@ -176,6 +176,21 @@ It deliberately retains the instance after completion or setup failure so
 evidence is not destroyed; cloud charges continue until the operator runs the
 printed deletion command.
 
+To avoid an unnecessary local upload of a large submitted archive, `ARCHIVE`
+may instead be an HTTPS URL in `entry.env`. Its URL path must end in the
+artifact's ordinary basename; the launcher downloads it directly on the cloud
+host, records its SHA-256, and places it under that basename in the external
+submission directory. Add `ARCHIVE_SHA256` to require a particular digest:
+
+```text
+ARCHIVE=https://downloads.example.org/entry/archive9
+ARCHIVE_SHA256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+```
+
+The URL form affects only transport of the submitted artifact. The rebuilt
+compressor must still create `archive9` (the basename derived from the URL),
+and the entry URL is never made available to contestant containers.
+
 If setup is interrupted by a transient SSH failure after the trusted host
 bootstrap completed, resume that retained instance instead of provisioning a
 second one:
@@ -404,7 +419,8 @@ DECOMPRESSOR + ARCHIVE   -> execution container -> DECOMPRESSED_OUTPUT
 
 `entry.env` is beside the artifacts, not hidden inside the source package. It
 is parsed as data and is never sourced as shell. Unknown keys, duplicate keys,
-paths, and shell syntax are rejected.
+paths, and shell syntax are rejected, except that `ARCHIVE` may be the
+restricted HTTPS transport URL documented above.
 
 ## Artifact handoff and runtime execution policy
 

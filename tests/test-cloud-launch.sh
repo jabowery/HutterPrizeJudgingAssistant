@@ -195,6 +195,28 @@ grep -q '^judging_command=.*\.\./HutterPrizeSubmissions/FullSubmission' \
   "$full_plan" \
   || fail "full cloud run did not use the external submission directory"
 
+url_entry="$test_root/URLSubmission"
+make_entry "$url_entry"
+sed -i 's#^ARCHIVE=archive9$#ARCHIVE=https://downloads.example.invalid/releases/archive9#' \
+  "$url_entry/entry.env"
+printf '%s\n' \
+  'ARCHIVE_SHA256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' \
+  >> "$url_entry/entry.env"
+url_plan="$test_root/url-plan"
+"$project_dir/launch-cloud-judging.sh" --dry-run \
+  "$url_entry" > "$url_plan"
+grep -q '^archive_present=yes$' "$url_plan" \
+  || fail "launcher did not treat an HTTPS ARCHIVE as a submitted archive"
+grep -q '^archive_transport=cloud-download$' "$url_plan" \
+  || fail "launcher did not select cloud archive download"
+grep -q '^archive_source_url=https://downloads.example.invalid/releases/archive9$' "$url_plan" \
+  || fail "launcher did not retain the declared archive URL"
+grep -q '^execution_mode=full_submission$' "$url_plan" \
+  || fail "URL archive unexpectedly selected source-only execution"
+if grep -q '^judging_command=.*--source-only' "$url_plan"; then
+  fail "URL archive command unexpectedly included --source-only"
+fi
+
 grep -q '^readonly enwik9_zip_bytes=322592222$' \
   "$project_dir/cloud/fetch-enwik9.sh" \
   || fail "cloud fetcher does not pin the official ZIP size"

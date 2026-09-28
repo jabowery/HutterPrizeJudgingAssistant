@@ -223,7 +223,14 @@ hp_manifest_require_linux || exit 2
   || die "entry is missing declared SOURCE_PACKAGE $HP_SOURCE_PACKAGE"
 
 source_only=false
-if [[ -e "$entry_dir/$HP_ARCHIVE" || -L "$entry_dir/$HP_ARCHIVE" ]]; then
+archive_transport=local-entry
+archive_source_url=not_applicable_local_entry
+archive_expected_sha256=not_provided
+if [[ -n "$HP_ARCHIVE_URL" ]]; then
+  archive_transport=cloud-download
+  archive_source_url="$HP_ARCHIVE_URL"
+  archive_expected_sha256="${HP_ARCHIVE_SHA256:-not_provided}"
+elif [[ -e "$entry_dir/$HP_ARCHIVE" || -L "$entry_dir/$HP_ARCHIVE" ]]; then
   [[ -f "$entry_dir/$HP_ARCHIVE" && ! -L "$entry_dir/$HP_ARCHIVE" ]] \
     || die "declared ARCHIVE is not a regular file: $HP_ARCHIVE"
 else
@@ -247,6 +254,8 @@ if [[ "$dry_run" == true ]]; then
   printf 'local_ssd_nvme=%s\n' "$local_ssd_nvme"
   printf 'entry=%s\n' "$entry_dir"
   printf 'archive_present=%s\n' "$([[ "$source_only" == true ]] && echo no || echo yes)"
+  printf 'archive_transport=%s\n' "$archive_transport"
+  printf 'archive_source_url=%s\n' "$archive_source_url"
   printf 'execution_mode=%s\n' "$([[ "$source_only" == true ]] && echo source_only || echo full_submission)"
   printf 'tmux_history_lines=%s\n' "$tmux_history_lines"
   printf 'reuse_instance=%s\n' "$reuse_instance"
@@ -486,6 +495,35 @@ ssh_remote "$extract_command" 'Extracting the entry transport archive'
 ssh_remote "$(shell_join rm -f "$remote_entry_transport")" \
   'Removing the verified entry transport archive'
 
+archive_fetch_helper_sha256=not_applicable
+archive_download_sha256=not_applicable
+if [[ "$archive_transport" == cloud-download ]]; then
+  remote_archive_fetcher="$remote_home/hutter-prize-fetch-archive-$stamp.sh"
+  archive_fetch_helper_sha256="$(
+    sha256sum -- "$script_dir/cloud/fetch-entry-archive.sh" | awk '{print $1}'
+  )"
+  echo "Uploading the trusted submitted-archive fetch helper..." >&2
+  scp_remote "$script_dir/cloud/fetch-entry-archive.sh" "$remote_archive_fetcher"
+  remote_sha256="$(ssh_remote "$(shell_join sha256sum "$remote_archive_fetcher")" \
+    'Verifying the trusted submitted-archive fetch helper' \
+    | awk 'END {print $1}')"
+  [[ "$remote_sha256" == "$archive_fetch_helper_sha256" ]] \
+    || die "trusted submitted-archive fetch-helper SHA-256 mismatch"
+  echo "Downloading the submitted archive on the cloud host..." >&2
+  archive_download_sha256="$(
+    ssh_remote "$(shell_join bash "$remote_archive_fetcher" "$HP_ARCHIVE_URL" \
+      "$remote_entry/$HP_ARCHIVE" "$HP_ARCHIVE_SHA256")" \
+      'Fetching submitted archive' | awk 'END {print $1}'
+  )"
+  [[ "$archive_download_sha256" =~ ^[0-9a-f]{64}$ ]] \
+    || die "could not record the downloaded submitted-archive SHA-256"
+  ssh_remote "$(shell_join test -f "$remote_entry/$HP_ARCHIVE")" \
+    'Verifying downloaded submitted archive' \
+    || die "downloaded submitted archive is missing or not a regular file"
+  ssh_remote "$(shell_join rm -f "$remote_archive_fetcher")" \
+    'Removing the trusted submitted-archive fetch helper'
+fi
+
 enwik9_transport=official-download
 enwik9_source_url="$canonical_enwik9_url"
 enwik9_fetch_helper_sha256=not_applicable
@@ -561,6 +599,11 @@ launch_record="$script_dir/Results/cloud-launch-$stamp-$entry_name.env"
   echo "tmux_runner_sha256=$tmux_runner_sha256"
   echo "entry_name=$entry_name"
   echo "entry_transport_sha256=$entry_transport_sha256"
+  echo "archive_transport=$archive_transport"
+  echo "archive_source_url=$archive_source_url"
+  echo "archive_expected_sha256=$archive_expected_sha256"
+  echo "archive_download_sha256=$archive_download_sha256"
+  echo "archive_fetch_helper_sha256=$archive_fetch_helper_sha256"
   echo "enwik9_sha256=$canonical_enwik9_sha256"
   echo "enwik9_transport=$enwik9_transport"
   echo "enwik9_source_url=$enwik9_source_url"
