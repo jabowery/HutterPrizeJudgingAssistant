@@ -22,6 +22,8 @@ network=""
 subnet=""
 tags=""
 labels=purpose=hutter-prize-judging
+threads_per_core=""
+local_ssd_nvme=false
 repo_url=https://github.com/jabowery/HutterPrizeJudgingAssistant.git
 repo_ref=main
 remote_repo_name=HutterPrizeJudgingAssistant
@@ -68,6 +70,8 @@ Cloud options:
   --subnet SUBNET            Optional VPC subnet
   --tags TAGS                Optional comma-separated network tags
   --labels LABELS            Default: purpose=hutter-prize-judging
+  --threads-per-core N       Optional physical-thread count per core
+  --local-ssd-nvme           Attach one ephemeral NVMe Local SSD at the default work root
   --reuse-instance           Resume setup on a retained initialized instance
 
 Remote-run options:
@@ -139,6 +143,8 @@ while (( $# > 0 )); do
     --subnet) (( $# >= 2 )) || usage_error "$1 requires a value"; subnet="$2"; shift 2 ;;
     --tags) (( $# >= 2 )) || usage_error "$1 requires a value"; tags="$2"; shift 2 ;;
     --labels) (( $# >= 2 )) || usage_error "$1 requires a value"; labels="$2"; shift 2 ;;
+    --threads-per-core) (( $# >= 2 )) || usage_error "$1 requires a value"; threads_per_core="$2"; shift 2 ;;
+    --local-ssd-nvme) local_ssd_nvme=true; shift ;;
     --reuse-instance) reuse_instance=true; shift ;;
     --repo-url) (( $# >= 2 )) || usage_error "$1 requires a value"; repo_url="$2"; shift 2 ;;
     --repo-ref) (( $# >= 2 )) || usage_error "$1 requires a value"; repo_ref="$2"; shift 2 ;;
@@ -192,6 +198,11 @@ done
   || usage_error "remote-repo-name must be a plain directory name"
 [[ "$remote_work_root" == /* && "$remote_work_root" != / ]] \
   || usage_error "remote-work-root must be an absolute path other than /"
+if [[ "$local_ssd_nvme" == true && "$remote_work_root" != /var/lib/hutter-prize-work ]]; then
+  usage_error "--local-ssd-nvme mounts only the default /var/lib/hutter-prize-work; omit --remote-work-root"
+fi
+[[ -z "$threads_per_core" || "$threads_per_core" =~ ^[1-9][0-9]*$ ]] \
+  || usage_error "threads-per-core must be a positive integer"
 [[ "$tmux_session" =~ ^[A-Za-z0-9_.-]+$ ]] || usage_error "invalid tmux session"
 [[ "$tmux_history_lines" =~ ^[1-9][0-9]*$ ]] \
   || usage_error "tmux-history-lines must be positive"
@@ -232,6 +243,8 @@ if [[ "$dry_run" == true ]]; then
   printf 'machine_type=%s\n' "$machine_type"
   printf 'region=%s\n' "$region"
   printf 'boot_disk_size=%s\n' "$boot_disk_size"
+  printf 'threads_per_core=%s\n' "${threads_per_core:-default}"
+  printf 'local_ssd_nvme=%s\n' "$local_ssd_nvme"
   printf 'entry=%s\n' "$entry_dir"
   printf 'archive_present=%s\n' "$([[ "$source_only" == true ]] && echo no || echo yes)"
   printf 'execution_mode=%s\n' "$([[ "$source_only" == true ]] && echo source_only || echo full_submission)"
@@ -320,6 +333,8 @@ else
     --image-project "$image_project"
     --labels "$labels"
   )
+  [[ -z "$threads_per_core" ]] || provision_args+=(--threads-per-core "$threads_per_core")
+  [[ "$local_ssd_nvme" != true ]] || provision_args+=(--local-ssd-nvme)
   for zone in "${requested_zones[@]}"; do provision_args+=(--zone "$zone"); done
   [[ -z "$network" ]] || provision_args+=(--network "$network")
   [[ -z "$subnet" ]] || provision_args+=(--subnet "$subnet")
@@ -357,8 +372,29 @@ wait_for_ssh() {
   return 1
 }
 
+wait_for_local_ssd_work_root() {
+  local attempt check_command
+  check_command="$(shell_join test -b /dev/disk/by-id/google-local-nvme-ssd-0)"
+  check_command+=" && $(shell_join mountpoint -q "$remote_work_root")"
+  check_command+=" && $(shell_join sh -c 'test "$(findmnt -no SOURCE --target "$1")" = "$(readlink -f /dev/disk/by-id/google-local-nvme-ssd-0)"' sh "$remote_work_root")"
+  for ((attempt = 1; attempt <= 60; attempt++)); do
+    if ssh_remote_once "$check_command" >/dev/null 2>&1; then
+      return 0
+    fi
+    (( attempt % 6 != 0 )) \
+      || echo "Waiting for Local SSD work root on $instance_name ($attempt/60)..." >&2
+    sleep 5
+  done
+  return 1
+}
+
 echo "Waiting for the new instance to accept SSH..." >&2
 wait_for_ssh || die "instance did not become reachable through gcloud compute ssh"
+if [[ "$local_ssd_nvme" == true ]]; then
+  echo "Waiting for the Local SSD work root to mount..." >&2
+  wait_for_local_ssd_work_root \
+    || die "Local SSD was not mounted at $remote_work_root by trusted startup metadata"
+fi
 remote_home="$(ssh_remote 'printf "%s\n" "$HOME"' \
   'Reading the retained user home' | tail -n 1)"
 [[ "$remote_home" == /* && "$remote_home" != / && "$remote_home" != *$'\n'* ]] \
@@ -387,6 +423,11 @@ else
   ssh_remote_once 'sudo reboot' >/dev/null 2>&1 || true
   sleep 10
   wait_for_ssh || die "instance did not return after its security-update reboot"
+  if [[ "$local_ssd_nvme" == true ]]; then
+    echo "Verifying the Local SSD work root after reboot..." >&2
+    wait_for_local_ssd_work_root \
+      || die "Local SSD was not remounted at $remote_work_root after reboot"
+  fi
 fi
 
 echo "Preparing the judging system at $repo_ref..." >&2

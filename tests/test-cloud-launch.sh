@@ -67,6 +67,7 @@ selected_zone="$(
     --project example-project \
     --name test-hutter-system \
     --machine-type t2d-standard-4 \
+    --threads-per-core 1 --local-ssd-nvme \
     --boot-disk-size 240GB \
     --tags wg-node \
     2>"$test_root/provision.stderr"
@@ -81,6 +82,12 @@ grep -q -- '--boot-disk-size=240GB' "$GCLOUD_TEST_LOG" \
   || fail "disk-size override was not forwarded"
 grep -q -- '--tags=wg-node' "$GCLOUD_TEST_LOG" \
   || fail "network tags were not forwarded"
+grep -q -- '--threads-per-core=1' "$GCLOUD_TEST_LOG" \
+  || fail "physical-thread override was not forwarded"
+grep -q -- '--local-ssd=interface=NVME' "$GCLOUD_TEST_LOG" \
+  || fail "NVMe Local SSD was not requested"
+grep -q -- 'metadata-from-file=startup-script=.*/cloud/mount-local-ssd-work.sh' "$GCLOUD_TEST_LOG" \
+  || fail "Local SSD work-root startup script was not requested"
 grep -q -- '--no-service-account' "$GCLOUD_TEST_LOG" \
   || fail "instance was not stripped of its service account"
 grep -q -- '--no-scopes' "$GCLOUD_TEST_LOG" \
@@ -148,7 +155,7 @@ source_entry="$test_root/SourceOnly"
 make_entry "$source_entry"
 source_plan="$test_root/source-plan"
 "$project_dir/launch-cloud-judging.sh" --dry-run \
-  --machine-type n4d-highmem-2 --tmux-history-lines 100000 \
+  --machine-type n4d-highmem-2 --threads-per-core 1 --local-ssd-nvme --tmux-history-lines 100000 \
   --reuse-instance \
   "$source_entry" > "$source_plan"
 grep -q '^machine_type=n4d-highmem-2$' "$source_plan" \
@@ -159,6 +166,10 @@ grep -q '^execution_mode=source_only$' "$source_plan" \
   || fail "launcher did not select source-only execution"
 grep -q '^reuse_instance=true$' "$source_plan" \
   || fail "launcher did not retain its resume selection"
+grep -q '^threads_per_core=1$' "$source_plan" \
+  || fail "launcher did not retain the physical-thread override"
+grep -q '^local_ssd_nvme=true$' "$source_plan" \
+  || fail "launcher did not retain NVMe Local SSD selection"
 grep -q '^enwik9_transport=official-download$' "$source_plan" \
   || fail "launcher did not default to cloud-side enwik9 download"
 grep -q '^judging_command=.*--source-only' "$source_plan" \

@@ -146,6 +146,27 @@ full 100 GB run allowance free after the operating system, Docker images,
 dependency layers, repository, inputs, and retained evidence have consumed
 space; a nominal 120 GB boot disk can fail that precondition.
 
+For an entry whose declared storage behavior warrants a local NVMe work
+filesystem, select a machine type and disk explicitly. For example, the
+following requests C2D with 16 GiB RAM, one hardware thread per core, and one
+ephemeral Local SSD:
+
+```bash
+./launch-cloud-judging.sh \
+  --machine-type c2d-highcpu-8 \
+  --threads-per-core 1 \
+  --local-ssd-nvme \
+  --boot-disk-size 90GB \
+  ../HutterPrizeSubmissions/NAME
+```
+
+`--local-ssd-nvme` mounts the attached NVMe disk only at the default work root
+`/var/lib/hutter-prize-work`, where the system places disposable runtime files.
+The transferred entry, the cloned system, and retained results stay on the
+persistent boot disk. Local SSD contents are lost when the instance stops or
+is deleted; this is appropriate for the disposable work tree, not for evidence.
+The option cannot be combined with `--remote-work-root`.
+
 If the artifact named by `ARCHIVE` in `entry.env` is absent, the launcher
 automatically selects `--source-only`: it builds the compressor, compresses
 `enwik9`, and then qualifies the generated archive. If that artifact is

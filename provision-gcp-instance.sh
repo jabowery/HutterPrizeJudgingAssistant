@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+
 instance_name=hutter-judging-node
 project=""
 machine_type=t2d-standard-4
@@ -13,6 +15,8 @@ network=""
 subnet=""
 tags=""
 labels=purpose=hutter-prize-judging
+threads_per_core=""
+local_ssd_nvme=false
 declare -a requested_zones=()
 
 usage() {
@@ -37,6 +41,8 @@ Options:
   --subnet SUBNET             Optional VPC subnet
   --tags TAGS                 Optional comma-separated network tags
   --labels LABELS             Default: purpose=hutter-prize-judging
+  --threads-per-core N        Optional physical-thread count per core
+  --local-ssd-nvme            Attach one NVMe Local SSD at /var/lib/hutter-prize-work
   -h, --help                  Show this help
 
 Local gcloud authentication is inherited from the invoking environment. It is
@@ -73,6 +79,8 @@ while (( $# > 0 )); do
     --subnet) (( $# >= 2 )) || usage_error "$1 requires a value"; subnet="$2"; shift 2 ;;
     --tags) (( $# >= 2 )) || usage_error "$1 requires a value"; tags="$2"; shift 2 ;;
     --labels) (( $# >= 2 )) || usage_error "$1 requires a value"; labels="$2"; shift 2 ;;
+    --threads-per-core) (( $# >= 2 )) || usage_error "$1 requires a value"; threads_per_core="$2"; shift 2 ;;
+    --local-ssd-nvme) local_ssd_nvme=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage_error "unknown option: $1" ;;
   esac
@@ -86,6 +94,8 @@ command -v gcloud >/dev/null 2>&1 || die "gcloud is not installed or is not in P
   || usage_error "machine, region, disk, and image values must not be empty"
 [[ "$boot_disk_size" =~ ^[1-9][0-9]*(GB|TB)$ ]] \
   || usage_error "boot-disk-size must be a whole number of GB or TB"
+[[ -z "$threads_per_core" || "$threads_per_core" =~ ^[1-9][0-9]*$ ]] \
+  || usage_error "threads-per-core must be a positive integer"
 
 if [[ -z "$project" ]]; then
   project="$(gcloud config get-value project 2>/dev/null)" \
@@ -153,6 +163,11 @@ for zone in "${candidate_zones[@]}"; do
     --shielded-integrity-monitoring
     --quiet
   )
+  [[ -z "$threads_per_core" ]] || create_args+=(--threads-per-core="$threads_per_core")
+  if [[ "$local_ssd_nvme" == true ]]; then
+    create_args+=(--local-ssd=interface=NVME)
+    create_args+=(--metadata-from-file="startup-script=$script_dir/cloud/mount-local-ssd-work.sh")
+  fi
   [[ -z "$network" ]] || create_args+=(--network="$network")
   [[ -z "$subnet" ]] || create_args+=(--subnet="$subnet")
   [[ -z "$tags" ]] || create_args+=(--tags="$tags")
