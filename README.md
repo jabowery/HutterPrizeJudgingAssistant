@@ -135,11 +135,17 @@ While a compression or decompression invocation is running, the trusted
 runtime supervisor writes one status line per minute to the tmux session and
 its log. It reports wall elapsed and remaining allowance for cost tracking,
 cumulative cgroup CPU time as utilization telemetry, allocated work storage,
-current cgroup memory, and the declared output artifact's current size. Use
-wall elapsed—not CPU time—when projecting whether an entry can finish within
-its Geekbench-adjusted time allowance. This is operational telemetry, not a
-claimed codec-completion percentage. The formal process-tree peak-RSS result
-remains the post-run measurement recorded in the evidence.
+current cgroup memory, and the declared output artifact's current size. For
+decompression, the expected output is the declared corpus size. For a full
+submission's rebuilt compression, the submitted archive size supplies the
+reference endpoint. Once the executable creates a nonempty output, the status
+also reports byte progress, linearly projected total wall time, and projected
+margin against the allowance. Before then—or for source-only compression with
+no submitted reference size—each projection field explicitly says
+`unavailable`. Use wall elapsed, not CPU time, for this cost decision. The
+linear projection is operational telemetry rather than a formal or guaranteed
+codec-completion percentage. The formal process-tree peak-RSS result remains
+the post-run measurement recorded in the evidence.
 
 The 200 GB boot-disk default is intentional. The worker must still have the
 full 100 GB run allowance free after the operating system, Docker images,

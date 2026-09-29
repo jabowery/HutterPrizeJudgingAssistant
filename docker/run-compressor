@@ -16,6 +16,7 @@ readonly executable_name="${EXECUTABLE_NAME:?EXECUTABLE_NAME is required}"
 readonly arguments_name="${ARGUMENTS_NAME:?ARGUMENTS_NAME is required}"
 readonly input_name="${INPUT_NAME:?INPUT_NAME is required}"
 readonly output_name="${OUTPUT_NAME:?OUTPUT_NAME is required}"
+readonly expected_output_size="${EXPECTED_OUTPUT_SIZE:-unavailable}"
 readonly runtime_exec_policy="${RUNTIME_EXEC_POLICY:-strict}"
 for value in "$executable_name" "$arguments_name" "$input_name" "$output_name"; do
   [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || exit 2
@@ -27,6 +28,9 @@ case "$time_limit_seconds:$memory_limit_bytes:$disk_limit_bytes:$disk_poll_secon
     exit 2
     ;;
 esac
+[[ "$expected_output_size" == unavailable \
+    || "$expected_output_size" =~ ^[1-9][0-9]*$ ]] \
+  || { echo "EXPECTED_OUTPUT_SIZE must be a positive integer or unavailable." >&2; exit 2; }
 hp_runtime_policy_validate "$runtime_exec_policy"
 
 for required in "$run_dir/$executable_name" "$run_dir/$arguments_name" \
@@ -129,7 +133,7 @@ while kill -0 "$timed_pid" 2>/dev/null; do
     hp_emit_runtime_status \
       "$start_epoch" "$((deadline_epoch_nanoseconds / 1000000000))" \
       "$current_disk_bytes" "$disk_limit_bytes" "$MEMORY_LIMIT_BYTES" \
-      "$run_dir/$output_name" "$cgroup_cpu_start_usec"
+      "$run_dir/$output_name" "$cgroup_cpu_start_usec" "$expected_output_size"
     last_status_epoch="$current_status_epoch"
   fi
 

@@ -33,8 +33,24 @@ runtime_status_line="$(hp_emit_runtime_status \
   || { echo "runtime status did not distinguish wall and CPU time" >&2; exit 1; }
 [[ "$runtime_status_line" == *disk=14\ GB/100\ GB* ]] \
   || { echo "runtime status did not report disk allocation" >&2; exit 1; }
-[[ "$runtime_status_line" == *'output=hutter-output-does-not-exist=not-created' ]] \
+[[ "$runtime_status_line" == *'output=hutter-output-does-not-exist=not-created'* ]] \
   || { echo "runtime status did not report output state" >&2; exit 1; }
+[[ "$runtime_status_line" == *'expected-output-bytes=unavailable linear-progress=unavailable linear-projected-total=unavailable linear-projected-margin=unavailable' ]] \
+  || { echo "runtime status did not explicitly report unavailable projection" >&2; exit 1; }
+
+projection_output="$(mktemp)"
+truncate --size=50 "$projection_output"
+projection_start="$(( $(date +%s) - 10 ))"
+projection_status_line="$(hp_emit_runtime_status \
+  "$projection_start" "$((projection_start + 1000))" \
+  14000000000 100000000000 17179869184 "$projection_output" unavailable 100 \
+  2>&1)"
+rm -f -- "$projection_output"
+[[ "$projection_status_line" == *'expected-output-bytes=100 linear-progress=50.00%'* ]] \
+  || { echo "runtime status did not calculate linear output progress" >&2; exit 1; }
+[[ "$projection_status_line" != *'linear-projected-total=unavailable'* \
+    && "$projection_status_line" != *'linear-projected-margin=unavailable'* ]] \
+  || { echo "runtime status did not calculate linear wall-time projection" >&2; exit 1; }
 readonly_collision_status="$(
   readonly start_epoch="$runtime_status_start"
   readonly deadline_epoch="$((runtime_status_start + 60))"

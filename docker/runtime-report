@@ -115,6 +115,15 @@ hp_format_hms_runtime() {
   printf '%02d:%02d:%02d' "$hours" "$minutes" "$seconds"
 }
 
+hp_format_signed_hms_runtime() {
+  local hp_rr_signed_seconds="$1" hp_rr_sign=+
+  if (( hp_rr_signed_seconds < 0 )); then
+    hp_rr_sign=-
+    hp_rr_signed_seconds="$((-hp_rr_signed_seconds))"
+  fi
+  printf '%s%s' "$hp_rr_sign" "$(hp_format_hms_runtime "$hp_rr_signed_seconds")"
+}
+
 hp_emit_runtime_status() {
   local hp_rr_start_epoch="$1"
   local hp_rr_deadline_epoch="$2"
@@ -123,9 +132,12 @@ hp_emit_runtime_status() {
   local hp_rr_cgroup_limit_bytes="$5"
   local hp_rr_output_path="$6"
   local hp_rr_cgroup_cpu_start_usec="$7"
+  local hp_rr_expected_output_bytes="${8:-unavailable}"
   local hp_rr_now_epoch hp_rr_elapsed_seconds hp_rr_remaining_seconds
   local hp_rr_cgroup_current hp_rr_cgroup_cpu_current_usec
-  local hp_rr_cpu_elapsed_seconds hp_rr_output_state
+  local hp_rr_cpu_elapsed_seconds hp_rr_output_state hp_rr_output_bytes
+  local hp_rr_progress hp_rr_projected_seconds hp_rr_projection_margin
+  local hp_rr_allowance_seconds
 
   hp_rr_now_epoch="$(date +%s)"
   hp_rr_elapsed_seconds="$((hp_rr_now_epoch - hp_rr_start_epoch))"
@@ -146,12 +158,34 @@ hp_emit_runtime_status() {
     hp_rr_cgroup_cpu_current_usec=unavailable
   fi
   if [[ -f "$hp_rr_output_path" && ! -L "$hp_rr_output_path" ]]; then
-    hp_rr_output_state="$(basename -- "$hp_rr_output_path")=$(stat --format='%s' -- "$hp_rr_output_path") bytes"
+    hp_rr_output_bytes="$(stat --format='%s' -- "$hp_rr_output_path")"
+    hp_rr_output_state="$(basename -- "$hp_rr_output_path")=$hp_rr_output_bytes bytes"
   else
+    hp_rr_output_bytes=unavailable
     hp_rr_output_state="$(basename -- "$hp_rr_output_path")=not-created"
   fi
 
-  printf 'STATUS: wall-elapsed=%s wall-remaining=%s cpu-used=%s disk=%s/%s cgroup-current=%s/%s output=%s\n' \
+  hp_rr_progress=unavailable
+  hp_rr_projected_seconds=unavailable
+  hp_rr_projection_margin=unavailable
+  if [[ "$hp_rr_expected_output_bytes" =~ ^[1-9][0-9]*$ \
+      && "$hp_rr_output_bytes" =~ ^[1-9][0-9]*$ \
+      && "$hp_rr_elapsed_seconds" -gt 0 ]]; then
+    hp_rr_progress="$(LC_ALL=C awk \
+      -v current="$hp_rr_output_bytes" -v expected="$hp_rr_expected_output_bytes" \
+      'BEGIN { printf "%.2f%%", 100 * current / expected }')"
+    hp_rr_projected_seconds="$(LC_ALL=C awk \
+      -v elapsed="$hp_rr_elapsed_seconds" -v current="$hp_rr_output_bytes" \
+      -v expected="$hp_rr_expected_output_bytes" \
+      'BEGIN { print int(elapsed * expected / current + 0.999999) }')"
+    hp_rr_allowance_seconds="$((hp_rr_deadline_epoch - hp_rr_start_epoch))"
+    (( hp_rr_allowance_seconds >= 0 )) || hp_rr_allowance_seconds=0
+    hp_rr_projection_margin="$((hp_rr_allowance_seconds - hp_rr_projected_seconds))"
+    hp_rr_projected_seconds="$(hp_format_hms_runtime "$hp_rr_projected_seconds")"
+    hp_rr_projection_margin="$(hp_format_signed_hms_runtime "$hp_rr_projection_margin")"
+  fi
+
+  printf 'STATUS: wall-elapsed=%s wall-remaining=%s cpu-used=%s disk=%s/%s cgroup-current=%s/%s output=%s expected-output-bytes=%s linear-progress=%s linear-projected-total=%s linear-projected-margin=%s\n' \
     "$(hp_format_hms_runtime "$hp_rr_elapsed_seconds")" \
     "$(hp_format_hms_runtime "$hp_rr_remaining_seconds")" \
     "$hp_rr_cgroup_cpu_current_usec" \
@@ -159,7 +193,11 @@ hp_emit_runtime_status() {
     "$(hp_format_gb_runtime "$hp_rr_disk_limit_bytes")" \
     "$hp_rr_cgroup_current" \
     "$(hp_format_gib_runtime "$hp_rr_cgroup_limit_bytes")" \
-    "$hp_rr_output_state" >&2
+    "$hp_rr_output_state" \
+    "$hp_rr_expected_output_bytes" \
+    "$hp_rr_progress" \
+    "$hp_rr_projected_seconds" \
+    "$hp_rr_projection_margin" >&2
 }
 
 hp_gnu_time_elapsed_seconds() {

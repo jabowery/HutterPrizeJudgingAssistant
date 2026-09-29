@@ -21,6 +21,7 @@ disk_poll_seconds=10
 cpu_limit=1
 runtime_exec_policy=strict
 expected_size=1000000000
+expected_output_size=unavailable
 active_container=""
 active_log_follower=""
 active_work_dir=""
@@ -49,6 +50,7 @@ Options:
   --runtime-exec-policy P    strict or process-tree (default: strict)
   --cold-cache               Evict and verify enwik9 before container start
   --expected-size N          Expected input bytes (default: 1000000000)
+  --expected-output-size N   Reference size for linear progress projection
   --image NAME               Override the catalog-derived local image tag
   -h, --help                 Show this help
 EOF
@@ -99,6 +101,7 @@ while (( $# > 0 )); do
     --cold-cache) cold_cache=true; shift ;;
     --cold-cache-helper) (( $# >= 2 )) || usage_error "$1 requires a value"; cold_cache_helper="$2"; shift 2 ;;
     --expected-size) (( $# >= 2 )) || usage_error "$1 requires a value"; expected_size="$2"; shift 2 ;;
+    --expected-output-size) (( $# >= 2 )) || usage_error "$1 requires a value"; expected_output_size="$2"; shift 2 ;;
     --image) (( $# >= 2 )) || usage_error "$1 requires a value"; image="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     -*) usage_error "unknown option: $1" ;;
@@ -114,6 +117,9 @@ for numeric_name in memory_limit_bytes disk_limit_bytes disk_poll_seconds expect
   value="${!numeric_name}"
   [[ "$value" =~ ^[1-9][0-9]*$ ]] || usage_error "$numeric_name must be a positive integer"
 done
+[[ "$expected_output_size" == unavailable \
+    || "$expected_output_size" =~ ^[1-9][0-9]*$ ]] \
+  || usage_error "expected_output_size must be a positive integer"
 if [[ "$expected_size" == 1000000000 && "$cold_cache" != true ]]; then
   usage_error "formal enwik9 runs require --cold-cache"
 fi
@@ -227,6 +233,7 @@ active_container="$(docker create \
   --env "ARGUMENTS_NAME=$HP_COMPRESSOR_ARGUMENTS" \
   --env "INPUT_NAME=enwik9" \
   --env "OUTPUT_NAME=$HP_ARCHIVE" \
+  --env "EXPECTED_OUTPUT_SIZE=$expected_output_size" \
   --env "TIME_LIMIT_SECONDS=$time_limit_seconds" \
   --env "MEMORY_LIMIT_BYTES=$memory_limit_bytes" \
   --env "DISK_LIMIT_BYTES=$disk_limit_bytes" \
@@ -316,6 +323,7 @@ fi
   echo "command_line_bytes=$(stat --format='%s' "$entry_dir/$HP_COMPRESSOR_ARGUMENTS")"
   echo "command_line_sha256=$(sha256sum "$entry_dir/$HP_COMPRESSOR_ARGUMENTS" | awk '{print $1}')"
   echo "archive_path=$output_path"
+  echo "expected_output_size=$expected_output_size"
   echo "archive_retained=$archive_retained"
   if [[ "$archive_retained" == yes ]]; then
     echo "archive_bytes=$(stat --format='%s' "$output_path")"

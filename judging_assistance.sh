@@ -592,6 +592,12 @@ compression_cold_options=()
 if [[ "$cold_cache" == true ]]; then
   compression_cold_options=(--cold-cache --cold-cache-helper "$cold_cache_helper")
 fi
+compression_projection_options=()
+if [[ "$source_only" != true ]]; then
+  compression_projection_options=(
+    --expected-output-size "$(stat --format='%s' "$submission_entry_dir/$HP_ARCHIVE")"
+  )
+fi
 if ! "$script_dir/compress-entry.sh" \
     --image "$dependency_runtime_image" --work-root "$work_root" \
     --results "$run_results/compression" \
@@ -603,6 +609,7 @@ if ! "$script_dir/compress-entry.sh" \
     --cpus "$cpu_limit" \
     --runtime-exec-policy "$runtime_exec_policy" \
     --expected-size "$expected_size" \
+    "${compression_projection_options[@]}" \
     "${compression_cold_options[@]}" \
     "$entry_dir" "$compressor_exec_path" "$reference_path"; then
   stage_fail compression "rebuilt compressor failed"
