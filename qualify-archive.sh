@@ -788,6 +788,7 @@ for entry_dir in "${entry_dirs[@]}"; do
     --env "ARGUMENTS_NAME=$arguments_runtime_name" \
     --env "TIME_LIMIT_SECONDS=$time_limit_seconds" \
     --env "MEMORY_LIMIT_BYTES=$memory_limit_bytes" \
+    --env "CGROUP_LIMIT_BYTES=$HP_EXECUTION_RAM_BYTES" \
     --env "DISK_LIMIT_BYTES=$disk_limit_bytes" \
     --env "DISK_POLL_SECONDS=$disk_poll_seconds" \
     --env "RUNTIME_EXEC_POLICY=$runtime_exec_policy" \

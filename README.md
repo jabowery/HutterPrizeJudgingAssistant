@@ -140,12 +140,22 @@ decompression, the expected output is the declared corpus size. For a full
 submission's rebuilt compression, the submitted archive size supplies the
 reference endpoint. Once the executable creates a nonempty output, the status
 also reports byte progress, linearly projected total wall time, and projected
-margin against the allowance. Before then—or for source-only compression with
-no submitted reference size—each projection field explicitly says
-`unavailable`. Use wall elapsed, not CPU time, for this cost decision. The
-linear projection is operational telemetry rather than a formal or guaranteed
-codec-completion percentage. The formal process-tree peak-RSS result remains
-the post-run measurement recorded in the evidence.
+margin against the allowance. If the output does not yet exist, the supervisor
+also looks for the largest regular input file being consumed sequentially
+through a read-only file descriptor in the isolated run directory. A usable
+kernel file position is reported as `read-cursor`, with separately labelled
+`read-linear-*` progress, total-time projection, and allowance margin fields.
+This fallback requires no entrant cooperation and can provide early cost
+guidance during stages that defer output creation.
+
+Use wall elapsed, not CPU time, for a cloud-cost decision. Both projections are
+operational telemetry, not formal or guaranteed codec-completion percentages,
+and the judging system never terminates an entry from a projection. Output may
+be nonlinear; the read-cursor fallback may be unavailable or misleading for
+memory-mapped, positional, random, repeated, or multi-file I/O. An operator may
+use the evidence to stop an uneconomic run, while only a completed measurement
+can establish the formal time result. The formal process-tree peak-RSS result
+likewise remains the post-run measurement recorded in the evidence.
 
 The 200 GB boot-disk default is intentional. The worker must still have the
 full 100 GB run allowance free after the operating system, Docker images,

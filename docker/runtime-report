@@ -124,6 +124,47 @@ hp_format_signed_hms_runtime() {
   printf '%s%s' "$hp_rr_sign" "$(hp_format_hms_runtime "$hp_rr_signed_seconds")"
 }
 
+hp_find_runtime_read_cursor() {
+  local hp_rr_cursor_run_dir="$1"
+  local hp_rr_fdinfo hp_rr_fd_path hp_rr_target hp_rr_flags hp_rr_flags_decimal
+  local hp_rr_position hp_rr_size hp_rr_name
+  local hp_rr_best_name= hp_rr_best_position=0 hp_rr_best_size=0
+
+  for hp_rr_fdinfo in /proc/[0-9]*/fdinfo/[0-9]*; do
+    [[ -r "$hp_rr_fdinfo" ]] || continue
+    hp_rr_fd_path="${hp_rr_fdinfo/\/fdinfo\//\/fd\/}"
+    hp_rr_target="$(readlink -- "$hp_rr_fd_path" 2>/dev/null)" || continue
+    hp_rr_target="${hp_rr_target% (deleted)}"
+    case "$hp_rr_target" in
+      "$hp_rr_cursor_run_dir"/*) ;;
+      "/opt/contestant-root$hp_rr_cursor_run_dir"/*)
+        hp_rr_target="${hp_rr_target#/opt/contestant-root}"
+        ;;
+      *) continue ;;
+    esac
+    [[ -f "$hp_rr_target" && ! -L "$hp_rr_target" ]] || continue
+    hp_rr_flags="$(awk '$1 == "flags:" { print $2 }' "$hp_rr_fdinfo" 2>/dev/null)"
+    [[ "$hp_rr_flags" =~ ^[0-7]+$ ]] || continue
+    hp_rr_flags_decimal="$((8#$hp_rr_flags))"
+    (( (hp_rr_flags_decimal & 3) == 0 )) || continue
+    hp_rr_position="$(awk '$1 == "pos:" { print $2 }' "$hp_rr_fdinfo" 2>/dev/null)"
+    hp_rr_size="$(stat --format='%s' -- "$hp_rr_target" 2>/dev/null)" || continue
+    [[ "$hp_rr_position" =~ ^[0-9]+$ && "$hp_rr_size" =~ ^[1-9][0-9]*$ ]] \
+      || continue
+    (( hp_rr_position > 0 && hp_rr_position < hp_rr_size )) || continue
+    (( hp_rr_size > hp_rr_best_size )) || continue
+    hp_rr_name="$(basename -- "$hp_rr_target")"
+    [[ "$hp_rr_name" =~ ^[A-Za-z0-9._-]+$ ]] || hp_rr_name=unnamed
+    hp_rr_best_name="$hp_rr_name"
+    hp_rr_best_position="$hp_rr_position"
+    hp_rr_best_size="$hp_rr_size"
+  done
+
+  [[ -n "$hp_rr_best_name" ]] || return 1
+  printf '%s\t%s\t%s\n' \
+    "$hp_rr_best_name" "$hp_rr_best_position" "$hp_rr_best_size"
+}
+
 hp_emit_runtime_status() {
   local hp_rr_start_epoch="$1"
   local hp_rr_deadline_epoch="$2"
@@ -133,11 +174,15 @@ hp_emit_runtime_status() {
   local hp_rr_output_path="$6"
   local hp_rr_cgroup_cpu_start_usec="$7"
   local hp_rr_expected_output_bytes="${8:-unavailable}"
+  local hp_rr_run_dir="${9:-/work/run}"
   local hp_rr_now_epoch hp_rr_elapsed_seconds hp_rr_remaining_seconds
   local hp_rr_cgroup_current hp_rr_cgroup_cpu_current_usec
   local hp_rr_cpu_elapsed_seconds hp_rr_output_state hp_rr_output_bytes
   local hp_rr_progress hp_rr_projected_seconds hp_rr_projection_margin
   local hp_rr_allowance_seconds
+  local hp_rr_cursor hp_rr_cursor_name hp_rr_cursor_position hp_rr_cursor_size
+  local hp_rr_cursor_state hp_rr_cursor_progress hp_rr_cursor_projected_seconds
+  local hp_rr_cursor_projection_margin
 
   hp_rr_now_epoch="$(date +%s)"
   hp_rr_elapsed_seconds="$((hp_rr_now_epoch - hp_rr_start_epoch))"
@@ -168,6 +213,8 @@ hp_emit_runtime_status() {
   hp_rr_progress=unavailable
   hp_rr_projected_seconds=unavailable
   hp_rr_projection_margin=unavailable
+  hp_rr_allowance_seconds="$((hp_rr_deadline_epoch - hp_rr_start_epoch))"
+  (( hp_rr_allowance_seconds >= 0 )) || hp_rr_allowance_seconds=0
   if [[ "$hp_rr_expected_output_bytes" =~ ^[1-9][0-9]*$ \
       && "$hp_rr_output_bytes" =~ ^[1-9][0-9]*$ \
       && "$hp_rr_elapsed_seconds" -gt 0 ]]; then
@@ -178,14 +225,34 @@ hp_emit_runtime_status() {
       -v elapsed="$hp_rr_elapsed_seconds" -v current="$hp_rr_output_bytes" \
       -v expected="$hp_rr_expected_output_bytes" \
       'BEGIN { print int(elapsed * expected / current + 0.999999) }')"
-    hp_rr_allowance_seconds="$((hp_rr_deadline_epoch - hp_rr_start_epoch))"
-    (( hp_rr_allowance_seconds >= 0 )) || hp_rr_allowance_seconds=0
     hp_rr_projection_margin="$((hp_rr_allowance_seconds - hp_rr_projected_seconds))"
     hp_rr_projected_seconds="$(hp_format_hms_runtime "$hp_rr_projected_seconds")"
     hp_rr_projection_margin="$(hp_format_signed_hms_runtime "$hp_rr_projection_margin")"
   fi
 
-  printf 'STATUS: wall-elapsed=%s wall-remaining=%s cpu-used=%s disk=%s/%s cgroup-current=%s/%s output=%s expected-output-bytes=%s linear-progress=%s linear-projected-total=%s linear-projected-margin=%s\n' \
+  hp_rr_cursor_state=unavailable
+  hp_rr_cursor_progress=unavailable
+  hp_rr_cursor_projected_seconds=unavailable
+  hp_rr_cursor_projection_margin=unavailable
+  if hp_rr_cursor="$(hp_find_runtime_read_cursor "$hp_rr_run_dir")"; then
+    IFS=$'\t' read -r hp_rr_cursor_name hp_rr_cursor_position hp_rr_cursor_size \
+      <<< "$hp_rr_cursor"
+    hp_rr_cursor_state="$hp_rr_cursor_name=$hp_rr_cursor_position/$hp_rr_cursor_size"
+    hp_rr_cursor_progress="$(LC_ALL=C awk \
+      -v current="$hp_rr_cursor_position" -v expected="$hp_rr_cursor_size" \
+      'BEGIN { printf "%.2f%%", 100 * current / expected }')"
+    if (( hp_rr_elapsed_seconds > 0 )); then
+      hp_rr_cursor_projected_seconds="$(LC_ALL=C awk \
+        -v elapsed="$hp_rr_elapsed_seconds" -v current="$hp_rr_cursor_position" \
+        -v expected="$hp_rr_cursor_size" \
+        'BEGIN { print int(elapsed * expected / current + 0.999999) }')"
+      hp_rr_cursor_projection_margin="$((hp_rr_allowance_seconds - hp_rr_cursor_projected_seconds))"
+      hp_rr_cursor_projected_seconds="$(hp_format_hms_runtime "$hp_rr_cursor_projected_seconds")"
+      hp_rr_cursor_projection_margin="$(hp_format_signed_hms_runtime "$hp_rr_cursor_projection_margin")"
+    fi
+  fi
+
+  printf 'STATUS: wall-elapsed=%s wall-remaining=%s cpu-used=%s disk=%s/%s cgroup-current=%s/%s output=%s expected-output-bytes=%s linear-progress=%s linear-projected-total=%s linear-projected-margin=%s read-cursor=%s read-linear-progress=%s read-linear-projected-total=%s read-linear-projected-margin=%s\n' \
     "$(hp_format_hms_runtime "$hp_rr_elapsed_seconds")" \
     "$(hp_format_hms_runtime "$hp_rr_remaining_seconds")" \
     "$hp_rr_cgroup_cpu_current_usec" \
@@ -197,7 +264,11 @@ hp_emit_runtime_status() {
     "$hp_rr_expected_output_bytes" \
     "$hp_rr_progress" \
     "$hp_rr_projected_seconds" \
-    "$hp_rr_projection_margin" >&2
+    "$hp_rr_projection_margin" \
+    "$hp_rr_cursor_state" \
+    "$hp_rr_cursor_progress" \
+    "$hp_rr_cursor_projected_seconds" \
+    "$hp_rr_cursor_projection_margin" >&2
 }
 
 hp_gnu_time_elapsed_seconds() {
