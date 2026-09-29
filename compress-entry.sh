@@ -6,6 +6,7 @@ source "$script_dir/lib/entry-env.sh"
 source "$script_dir/lib/prize-limits.sh"
 source "$script_dir/lib/resource-units.sh"
 source "$script_dir/lib/cold-cache.sh"
+source "$script_dir/lib/runtime-handoff.sh"
 image=""
 entry_dir=""
 compressor_path=""
@@ -27,6 +28,10 @@ active_log_follower=""
 active_work_dir=""
 cold_cache=false
 cold_cache_helper=""
+container_id_file=""
+status_path_file=""
+start_gate=""
+ready_file=""
 
 usage() {
   cat <<'EOF'
@@ -52,6 +57,10 @@ Options:
   --expected-size N          Expected input bytes (default: 1000000000)
   --expected-output-size N   Reference size for linear progress projection
   --image NAME               Override the catalog-derived local image tag
+  --container-id-file FILE   Internal active-container handoff for parent cleanup
+  --status-path-file FILE    Internal live-status path handoff
+  --start-gate FILE          Internal coordinated-start gate
+  --ready-file FILE          Internal coordinated-start readiness handoff
   -h, --help                 Show this help
 EOF
 }
@@ -75,6 +84,7 @@ cleanup() {
     active_log_follower=""
   fi
   [[ -z "$active_container" ]] || docker rm --force "$active_container" >/dev/null 2>&1 || true
+  [[ -z "$container_id_file" ]] || rm -f -- "$container_id_file"
   if [[ -n "$active_work_dir" && -d "$active_work_dir" ]]; then
     docker run --rm --network none \
       --mount "type=bind,source=$active_work_dir,target=/work" \
@@ -103,6 +113,10 @@ while (( $# > 0 )); do
     --expected-size) (( $# >= 2 )) || usage_error "$1 requires a value"; expected_size="$2"; shift 2 ;;
     --expected-output-size) (( $# >= 2 )) || usage_error "$1 requires a value"; expected_output_size="$2"; shift 2 ;;
     --image) (( $# >= 2 )) || usage_error "$1 requires a value"; image="$2"; shift 2 ;;
+    --container-id-file) (( $# >= 2 )) || usage_error "$1 requires a value"; container_id_file="$2"; shift 2 ;;
+    --status-path-file) (( $# >= 2 )) || usage_error "$1 requires a value"; status_path_file="$2"; shift 2 ;;
+    --start-gate) (( $# >= 2 )) || usage_error "$1 requires a value"; start_gate="$2"; shift 2 ;;
+    --ready-file) (( $# >= 2 )) || usage_error "$1 requires a value"; ready_file="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     -*) usage_error "unknown option: $1" ;;
     *) positional+=("$1"); shift ;;
@@ -126,6 +140,17 @@ fi
 if [[ -n "$cold_cache_helper" && "$cold_cache" != true ]]; then
   usage_error "--cold-cache-helper requires --cold-cache"
 fi
+if [[ -n "$start_gate" || -n "$ready_file" ]]; then
+  [[ -n "$start_gate" && -n "$ready_file" ]] \
+    || usage_error "--start-gate and --ready-file must be used together"
+fi
+container_id_file="$(hp_runtime_handoff_output_path \
+  "$container_id_file" "container ID file")" || exit 2
+status_path_file="$(hp_runtime_handoff_output_path \
+  "$status_path_file" "status path file")" || exit 2
+ready_file="$(hp_runtime_handoff_output_path \
+  "$ready_file" "ready file")" || exit 2
+start_gate="$(hp_runtime_handoff_gate_path "$start_gate")" || exit 2
 [[ "$cpu_limit" =~ ^[0-9]+([.][0-9]+)?$ ]] \
   && awk -v n="$cpu_limit" 'BEGIN { exit !(n > 0) }' \
   || usage_error "cpus must be positive"
@@ -205,6 +230,12 @@ docker run --rm \
   --env "OUTPUT_NAME=$HP_ARCHIVE" \
   "$image" /usr/local/bin/init-compression
 
+if [[ -n "$status_path_file" ]]; then
+  printf '%s\n' "$active_work_dir/report/runtime-status.env" \
+    > "$status_path_file"
+  chmod 0400 -- "$status_path_file"
+fi
+
 cold_cache_target_bytes=""
 cold_cache_target_sha256=""
 if [[ "$cold_cache" == true ]]; then
@@ -242,6 +273,11 @@ active_container="$(docker create \
   --env "RUNTIME_EXEC_POLICY=$runtime_exec_policy" \
   "$image" /usr/local/bin/run-compressor)"
 
+if [[ -n "$container_id_file" ]]; then
+  printf '%s\n' "$active_container" > "$container_id_file"
+  chmod 0400 -- "$container_id_file"
+fi
+
 echo "[$entry_name] compressing offline as UID 65532 (limit: $(hp_format_hms "$time_limit_seconds"))" >&2
 if [[ "$cold_cache" == true ]]; then
   echo "[$entry_name] evicting and verifying enwik9 before container start" >&2
@@ -250,6 +286,7 @@ if [[ "$cold_cache" == true ]]; then
     "$cold_cache_target_bytes" "$cold_cache_target_sha256" enwik9 \
     || die "cold-cache eviction or zero-residency verification failed"
 fi
+hp_runtime_handoff_wait_for_gate "$start_gate" "$ready_file"
 docker start "$active_container" >/dev/null
 docker logs --follow "$active_container" &
 active_log_follower=$!

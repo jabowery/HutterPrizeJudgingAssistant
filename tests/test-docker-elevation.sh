@@ -152,6 +152,7 @@ PATH="$test_dir/bin:$PATH" \
     --executable archive9 \
     --output data9 \
     --expected-size "$(stat --format='%s' "$test_dir/enwik9")" \
+    --skip-storage-preflight \
     --disk-limit-bytes 1 \
     --work-root "$test_dir/automatic-work" \
     --results "$test_dir/automatic-results" \
@@ -160,7 +161,11 @@ PATH="$test_dir/bin:$PATH" \
 automatic_exit=$?
 set -e
 
-(( automatic_exit == 91 ))
+if (( automatic_exit != 91 )); then
+  cat "$test_dir/automatic.stderr" >&2
+  echo "automatic calibration test exited $automatic_exit; expected 91" >&2
+  exit 1
+fi
 grep -q 'Running automatic Geekbench 5 calibration' \
   "$test_dir/automatic.stderr"
 automatic_preflight="$(find "$test_dir/automatic-results" \

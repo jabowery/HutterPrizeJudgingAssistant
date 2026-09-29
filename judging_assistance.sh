@@ -31,6 +31,8 @@ cold_cache_helper=""
 active_stage_root=""
 qualification_pid=""
 qualification_container_file=""
+compression_pid=""
+compression_container_file=""
 results_path_created=false
 run_results=""
 work_capacity_error=""
@@ -66,8 +68,8 @@ Options:
   --disk-poll-seconds N      Default: 10
   --cpus N                   Default: 1
   --runtime-exec-policy P    process-tree (default) or strict diagnostic mode
-  --jobs N                   Diagnostic concurrency: 1 or 2 (default: 2)
-  --serial                   Alias for --jobs 1, for disputed CPU timings
+  --jobs N                   Long-running jobs: 1 or adaptive 2 (default: 2)
+  --serial                   Disable adaptive parallel screening
   --cold-cache               Enable cache control for a diagnostic run
   --source-only              Build, compress, and qualify only the generated archive
   --record-size N            Default: 110793128
@@ -230,6 +232,16 @@ remove_qualification_container() {
     rm -f -- "$qualification_container_file"
   fi
 }
+remove_compression_container() {
+  local container_id=""
+  if [[ -r "$compression_container_file" ]]; then
+    IFS= read -r container_id < "$compression_container_file" || true
+    if [[ "$container_id" =~ ^[0-9a-f]{12,64}$ ]]; then
+      docker rm --force "$container_id" >/dev/null 2>&1 || true
+    fi
+    rm -f -- "$compression_container_file"
+  fi
+}
 cleanup_qualification() {
   local attempt
   remove_qualification_container
@@ -250,7 +262,28 @@ cleanup_qualification() {
     rm -f -- "$qualification_container_file"
   fi
 }
+cleanup_compression() {
+  local attempt
+  remove_compression_container
+  if [[ -n "$compression_pid" ]]; then
+    kill -TERM "$compression_pid" >/dev/null 2>&1 || true
+    for ((attempt = 0; attempt < 50; attempt++)); do
+      remove_compression_container
+      kill -0 "$compression_pid" >/dev/null 2>&1 || break
+      sleep 0.1
+    done
+    if kill -0 "$compression_pid" >/dev/null 2>&1; then
+      kill -KILL "$compression_pid" >/dev/null 2>&1 || true
+    fi
+    wait "$compression_pid" >/dev/null 2>&1 || true
+    compression_pid=""
+  fi
+  if [[ -n "$compression_container_file" ]]; then
+    rm -f -- "$compression_container_file"
+  fi
+}
 cleanup_all() {
+  cleanup_compression
   cleanup_qualification
   cleanup_staged_entry
   restore_invoking_user_ownership
@@ -284,6 +317,65 @@ stage_fail() {
   printf 'FAIL at %s: %s\nResults: %s\n' "$stage" "$reason" "$run_results" \
     | tee "$run_results/final-report.txt" >&2
   exit 1
+}
+
+adaptive_status_snapshot() {
+  local pointer_file="$1" status_file sample available overflow
+  [[ -r "$pointer_file" && ! -L "$pointer_file" ]] || return 1
+  IFS= read -r status_file < "$pointer_file" || return 1
+  case "$status_file" in
+    "$work_root"/*/report/runtime-status.env) ;;
+    *) return 1 ;;
+  esac
+  [[ -f "$status_file" && ! -L "$status_file" ]] || return 1
+  sample="$(awk -F= '$1 == "sample_epoch" {print $2}' "$status_file")"
+  available="$(awk -F= '$1 == "projection_available" {print $2}' "$status_file")"
+  overflow="$(awk -F= '$1 == "projection_overflow" {print $2}' "$status_file")"
+  [[ "$sample" =~ ^[0-9]+$ ]] || return 1
+  [[ "$available" == yes || "$available" == no ]] || return 1
+  if [[ "$available" == yes ]]; then
+    [[ "$overflow" == yes || "$overflow" == no ]] || return 1
+  else
+    overflow=unavailable
+  fi
+  printf '%s\t%s\t%s\n' "$sample" "$available" "$overflow"
+}
+
+emit_operator_attention() {
+  local phase="$1" reason="$2" temporary message
+  case "$reason" in
+    *projection_exceeds_allowance)
+      message="the projected wall time exceeds the allowance"
+      ;;
+    *)
+      message="progress cannot be projected"
+      ;;
+  esac
+  temporary="$run_results/.operator-attention.env.$$"
+  {
+    echo "attention_required=yes"
+    echo "event=runtime_operator_attention"
+    echo "phase=$phase"
+    echo "reason=$reason"
+    echo "emitted_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "operator_action=inspect_and_choose_continue_or_terminate"
+  } > "$temporary"
+  chmod 0444 -- "$temporary"
+  mv -- "$temporary" "$run_results/operator-attention.env"
+  printf 'OPERATOR_ATTENTION: phase=%s reason=%s; %s; inspect the run and choose whether to continue or terminate.\n' \
+    "$phase" "$reason" "$message" \
+    | tee -a "$run_results/operator-attention.log" >&2
+}
+
+wait_for_coordinated_readiness() {
+  local first_pid="$1" second_pid="$2" first_ready="$3" second_ready="$4"
+  while [[ ! -f "$first_ready" || ! -f "$second_ready" ]]; do
+    kill -0 "$first_pid" 2>/dev/null \
+      || return 1
+    kill -0 "$second_pid" 2>/dev/null \
+      || return 1
+    sleep 1
+  done
 }
 
 declare -a positional=()
@@ -325,9 +417,6 @@ done
   || usage_error "jobs must be 1 or 2"
 if [[ "$expected_size" == 1000000000 ]]; then
   cold_cache=true
-  if [[ "$job_slots_explicit" != true ]]; then
-    job_slots=1
-  fi
 fi
 if [[ "$source_only" == true ]]; then
   if [[ "$job_slots_explicit" == true && "$job_slots" != 1 ]]; then
@@ -335,8 +424,19 @@ if [[ "$source_only" == true ]]; then
   fi
   job_slots=1
 fi
-if [[ "$cold_cache" == true && "$job_slots" != 1 ]]; then
-  usage_error "formal cache control requires serial execution; omit --jobs 2 or specify --serial"
+host_memory_bytes="$(awk '/^MemTotal:/ {print $2 * 1024}' /proc/meminfo \
+  | awk '{printf "%.0f\n", $1}')"
+if [[ "$source_only" != true && "$job_slots" == 2 ]]; then
+  adaptive_memory_required="$((2 * HP_EXECUTION_RAM_BYTES))"
+  adaptive_memory_tolerance=1073741824
+  if [[ ! "$host_memory_bytes" =~ ^[1-9][0-9]*$ \
+      || "$((host_memory_bytes + adaptive_memory_tolerance))" \
+        -lt "$adaptive_memory_required" ]]; then
+    printf 'WARNING: adaptive parallel screening requires at least %s host RAM for two %s execution environments; using serial mode on this host.\n' \
+      "$(hp_format_gib "$adaptive_memory_required")" \
+      "$(hp_format_gib "$HP_EXECUTION_RAM_BYTES")" >&2
+    job_slots=1
+  fi
 fi
 case "$runtime_exec_policy" in
   strict|process-tree) ;;
@@ -416,7 +516,11 @@ if [[ "$cold_cache" == true ]]; then
   host_kernel="$(uname -r)"
   {
     echo "cold_cache=enabled"
-    echo "execution_mode=serial"
+    if (( job_slots == 2 )); then
+      echo "execution_mode=coordinated-adaptive-parallel"
+    else
+      echo "execution_mode=serial"
+    fi
     echo "host_kernel=$host_kernel"
     if [[ "${host_kernel,,}" == *microsoft* ]]; then
       echo "wsl=yes"
@@ -539,17 +643,9 @@ else
   qualification_command+=("$submitted_execution_dir" "$reference_path")
 
   if (( job_slots == 2 )); then
-    execution_mode=parallel
-    echo "[$entry_name] starting submitted decompression qualification in parallel" >&2
-    "${qualification_command[@]}" &
-    qualification_pid=$!
+    execution_mode=adaptive-parallel
   else
     execution_mode=serial
-    echo "[$entry_name] validating submitted decompression in serial mode" >&2
-    if ! "${qualification_command[@]}"; then
-      stage_fail submitted_decompression "submitted artifacts did not reproduce enwik9"
-    fi
-    submitted_qualification=pass
   fi
 fi
 
@@ -587,7 +683,6 @@ if [[ "$HP_ENTRY_FORMAT" == separate-decompressor ]]; then
 fi
 
 generated_archive="$run_results/generated/$HP_ARCHIVE"
-echo "[$entry_name] starting rebuilt-compressor compression ($execution_mode mode)" >&2
 compression_cold_options=()
 if [[ "$cold_cache" == true ]]; then
   compression_cold_options=(--cold-cache --cold-cache-helper "$cold_cache_helper")
@@ -598,7 +693,7 @@ if [[ "$source_only" != true ]]; then
     --expected-output-size "$(stat --format='%s' "$submission_entry_dir/$HP_ARCHIVE")"
   )
 fi
-if ! "$script_dir/compress-entry.sh" \
+compression_command=("$script_dir/compress-entry.sh" \
     --image "$dependency_runtime_image" --work-root "$work_root" \
     --results "$run_results/compression" \
     --output "$generated_archive" \
@@ -611,20 +706,304 @@ if ! "$script_dir/compress-entry.sh" \
     --expected-size "$expected_size" \
     "${compression_projection_options[@]}" \
     "${compression_cold_options[@]}" \
-    "$entry_dir" "$compressor_exec_path" "$reference_path"; then
-  stage_fail compression "rebuilt compressor failed"
-fi
+    "$entry_dir" "$compressor_exec_path" "$reference_path")
 
-if [[ "$source_only" != true ]] && (( job_slots == 2 )); then
-  echo "[$entry_name] compression finished; waiting for submitted qualification" >&2
-  if wait "$qualification_pid"; then
-    qualification_pid=""
+compression_complete=false
+qualification_deferred=false
+adaptive_restart_serial=false
+qualification_projection=not_observed
+compression_projection=not_observed
+
+if [[ "$source_only" == true || "$job_slots" == 1 ]]; then
+  if [[ "$source_only" != true ]]; then
+    echo "[$entry_name] validating submitted decompression in serial mode" >&2
+    if ! "${qualification_command[@]}"; then
+      stage_fail submitted_decompression "submitted artifacts did not reproduce enwik9"
+    fi
     submitted_qualification=pass
-  else
-    qualification_exit=$?
-    qualification_pid=""
-    stage_fail submitted_decompression \
-      "submitted artifacts did not reproduce enwik9 (exit $qualification_exit)"
+  fi
+  echo "[$entry_name] starting rebuilt-compressor compression (serial mode)" >&2
+  if ! "${compression_command[@]}"; then
+    stage_fail compression "rebuilt compressor failed"
+  fi
+  compression_complete=true
+else
+  adaptive_dir="$run_results/adaptive-control"
+  mkdir -p -- "$adaptive_dir"
+  chmod 0700 -- "$adaptive_dir"
+  adaptive_gate="$adaptive_dir/start.gate"
+  qualification_ready="$adaptive_dir/decompressor.ready"
+  compression_ready="$adaptive_dir/compressor.ready"
+  qualification_status_pointer="$adaptive_dir/decompressor-status.path"
+  compression_status_pointer="$adaptive_dir/compressor-status.path"
+  compression_container_file="$adaptive_dir/compressor-container-id"
+
+  qualification_adaptive_command=("${qualification_command[@]}"
+    --status-path-file "$qualification_status_pointer"
+    --start-gate "$adaptive_gate" --ready-file "$qualification_ready")
+  compression_adaptive_command=("${compression_command[@]}"
+    --container-id-file "$compression_container_file"
+    --status-path-file "$compression_status_pointer"
+    --start-gate "$adaptive_gate" --ready-file "$compression_ready")
+
+  echo "[$entry_name] staging submitted decompression and rebuilt compression for a coordinated start" >&2
+  "${qualification_adaptive_command[@]}" &
+  qualification_pid=$!
+  "${compression_adaptive_command[@]}" &
+  compression_pid=$!
+  if ! wait_for_coordinated_readiness \
+      "$qualification_pid" "$compression_pid" \
+      "$qualification_ready" "$compression_ready"; then
+    cleanup_compression
+    cleanup_qualification
+    stage_fail adaptive_start "a worker failed before the coordinated start"
+  fi
+  printf 'start\n' > "$adaptive_gate"
+  chmod 0400 -- "$adaptive_gate"
+  echo "[$entry_name] submitted decompression and rebuilt compression started together" >&2
+
+  qualification_last_sample=""
+  compression_last_sample=""
+  qualification_unavailable_samples=0
+  compression_unavailable_samples=0
+  qualification_overflow_samples=0
+  compression_overflow_samples=0
+  qualification_projection=waiting
+  compression_projection=waiting
+  operator_attention_emitted=false
+
+  while [[ "$compression_complete" != true \
+      || "$submitted_qualification" != pass ]]; do
+    if [[ -n "$qualification_pid" ]] \
+        && ! kill -0 "$qualification_pid" 2>/dev/null; then
+      set +e
+      wait "$qualification_pid"
+      qualification_exit=$?
+      set -e
+      qualification_pid=""
+      if (( qualification_exit != 0 )); then
+        cleanup_compression
+        stage_fail submitted_decompression \
+          "submitted artifacts did not reproduce enwik9 (exit $qualification_exit)"
+      fi
+      submitted_qualification=pass
+      qualification_projection=completed
+    fi
+    if [[ -n "$compression_pid" ]] \
+        && ! kill -0 "$compression_pid" 2>/dev/null; then
+      set +e
+      wait "$compression_pid"
+      compression_exit=$?
+      set -e
+      compression_pid=""
+      if (( compression_exit != 0 )); then
+        cleanup_qualification
+        stage_fail compression "rebuilt compressor failed (exit $compression_exit)"
+      fi
+      compression_complete=true
+      compression_projection=completed
+    fi
+
+    if [[ -n "$qualification_pid" ]] \
+        && snapshot="$(adaptive_status_snapshot \
+          "$qualification_status_pointer")"; then
+      IFS=$'\t' read -r sample available overflow <<< "$snapshot"
+      if [[ "$sample" != "$qualification_last_sample" ]]; then
+        qualification_last_sample="$sample"
+        if [[ "$available" == yes ]]; then
+          qualification_projection=within
+          qualification_unavailable_samples=0
+          if [[ "$overflow" == yes ]]; then
+            qualification_projection=overflow
+            qualification_overflow_samples=$((qualification_overflow_samples + 1))
+            if (( qualification_overflow_samples >= 2 )); then
+              adaptive_restart_serial=true
+            fi
+          else
+            qualification_overflow_samples=0
+          fi
+        else
+          qualification_overflow_samples=0
+          qualification_unavailable_samples=$((qualification_unavailable_samples + 1))
+          if (( qualification_unavailable_samples >= 2 )); then
+            qualification_projection=unavailable
+            echo "[$entry_name] submitted decompression exposed no usable progress projection; stopping its parallel attempt" >&2
+            cleanup_qualification
+            submitted_qualification=deferred_progress_unavailable
+            qualification_deferred=true
+          fi
+        fi
+      fi
+    fi
+
+    if [[ -n "$compression_pid" ]] \
+        && snapshot="$(adaptive_status_snapshot \
+          "$compression_status_pointer")"; then
+      IFS=$'\t' read -r sample available overflow <<< "$snapshot"
+      if [[ "$sample" != "$compression_last_sample" ]]; then
+        compression_last_sample="$sample"
+        if [[ "$available" == yes ]]; then
+          compression_projection=within
+          compression_unavailable_samples=0
+          if [[ "$overflow" == yes ]]; then
+            compression_projection=overflow
+            compression_overflow_samples=$((compression_overflow_samples + 1))
+            if (( compression_overflow_samples >= 2 )); then
+              adaptive_restart_serial=true
+            fi
+          else
+            compression_overflow_samples=0
+          fi
+        else
+          compression_overflow_samples=0
+          compression_unavailable_samples=$((compression_unavailable_samples + 1))
+          if (( compression_unavailable_samples >= 2 )); then
+            compression_projection=unavailable
+            if [[ "$qualification_deferred" == true \
+                && "$operator_attention_emitted" != true ]]; then
+              emit_operator_attention compressor \
+                both_parallel_phases_lack_progress_projection
+              operator_attention_emitted=true
+            fi
+          fi
+        fi
+      fi
+    fi
+
+    if [[ "$qualification_deferred" == true \
+        && "$compression_projection" == unavailable \
+        && "$operator_attention_emitted" != true ]]; then
+      emit_operator_attention compressor \
+        both_parallel_phases_lack_progress_projection
+      operator_attention_emitted=true
+    fi
+
+    if [[ "$adaptive_restart_serial" == true ]]; then
+      echo "[$entry_name] a parallel projection exceeds the allowance; restarting in serial mode with submitted decompression first" >&2
+      cleanup_compression
+      cleanup_qualification
+      submitted_qualification=restart_required
+      break
+    fi
+    if [[ "$compression_complete" == true \
+        && ( "$submitted_qualification" == pass \
+          || "$qualification_deferred" == true ) ]]; then
+      break
+    fi
+    sleep 2
+  done
+
+  rm -f -- "$adaptive_gate" "$qualification_ready" "$compression_ready" \
+    "$qualification_status_pointer" "$compression_status_pointer" \
+    "$qualification_container_file" "$compression_container_file"
+
+  if [[ "$adaptive_restart_serial" == true ]]; then
+    execution_mode=adaptive-serial-restart
+  fi
+
+  if [[ "$submitted_qualification" != pass \
+      && ! ( "$qualification_deferred" == true \
+        && "$compression_complete" == true ) ]]; then
+    serial_qualification_status="$adaptive_dir/serial-decompressor-status.path"
+    qualification_serial_command=("${qualification_command[@]}"
+      --status-path-file "$serial_qualification_status")
+    echo "[$entry_name] starting submitted decompression serially" >&2
+    "${qualification_serial_command[@]}" &
+    qualification_pid=$!
+    serial_last_sample=""
+    serial_unavailable_samples=0
+    serial_qualification_unobservable=false
+    while kill -0 "$qualification_pid" 2>/dev/null; do
+      if snapshot="$(adaptive_status_snapshot \
+          "$serial_qualification_status")"; then
+        IFS=$'\t' read -r sample available overflow <<< "$snapshot"
+        if [[ "$sample" != "$serial_last_sample" ]]; then
+          serial_last_sample="$sample"
+          if [[ "$available" == yes ]]; then
+            if [[ "$overflow" == yes ]]; then
+              emit_operator_attention submitted_decompression \
+                serial_projection_exceeds_allowance
+            fi
+            break
+          fi
+          serial_unavailable_samples=$((serial_unavailable_samples + 1))
+          if (( serial_unavailable_samples >= 2 )); then
+            serial_qualification_unobservable=true
+            break
+          fi
+        fi
+      fi
+      sleep 2
+    done
+    if [[ "$serial_qualification_unobservable" == true ]]; then
+      echo "[$entry_name] submitted decompression still exposes no projection; stopping it and testing compression serially" >&2
+      cleanup_qualification
+      submitted_qualification=deferred_progress_unavailable
+      qualification_deferred=true
+    else
+      set +e
+      wait "$qualification_pid"
+      qualification_exit=$?
+      set -e
+      qualification_pid=""
+      (( qualification_exit == 0 )) \
+        || stage_fail submitted_decompression \
+          "submitted artifacts did not reproduce enwik9 (exit $qualification_exit)"
+      submitted_qualification=pass
+      qualification_deferred=false
+    fi
+    rm -f -- "$serial_qualification_status" "$qualification_container_file"
+  fi
+
+  if [[ "$compression_complete" != true ]]; then
+    serial_compression_status="$adaptive_dir/serial-compressor-status.path"
+    compression_container_file="$adaptive_dir/serial-compressor-container-id"
+    compression_serial_command=("${compression_command[@]}"
+      --container-id-file "$compression_container_file"
+      --status-path-file "$serial_compression_status")
+    echo "[$entry_name] starting rebuilt compression serially" >&2
+    "${compression_serial_command[@]}" &
+    compression_pid=$!
+    serial_last_sample=""
+    serial_unavailable_samples=0
+    while kill -0 "$compression_pid" 2>/dev/null; do
+      if snapshot="$(adaptive_status_snapshot "$serial_compression_status")"; then
+        IFS=$'\t' read -r sample available overflow <<< "$snapshot"
+        if [[ "$sample" != "$serial_last_sample" ]]; then
+          serial_last_sample="$sample"
+          if [[ "$available" == yes ]]; then
+            [[ "$overflow" != yes ]] \
+              || emit_operator_attention compression \
+                serial_projection_exceeds_allowance
+            break
+          fi
+          serial_unavailable_samples=$((serial_unavailable_samples + 1))
+          if (( serial_unavailable_samples >= 2 )); then
+            emit_operator_attention compression \
+              compressor_progress_projection_unavailable
+            break
+          fi
+        fi
+      fi
+      sleep 2
+    done
+    set +e
+    wait "$compression_pid"
+    compression_exit=$?
+    set -e
+    compression_pid=""
+    (( compression_exit == 0 )) \
+      || stage_fail compression "rebuilt compressor failed (exit $compression_exit)"
+    compression_complete=true
+    rm -f -- "$serial_compression_status" "$compression_container_file"
+  fi
+
+  if [[ "$submitted_qualification" != pass ]]; then
+    echo "[$entry_name] rebuilt compression completed; retrying submitted decompression for qualification" >&2
+    if ! "${qualification_command[@]}"; then
+      stage_fail submitted_decompression "submitted artifacts did not reproduce enwik9"
+    fi
+    submitted_qualification=pass
   fi
 fi
 
@@ -742,6 +1121,10 @@ fi
   echo "disk_limit_bytes=$disk_limit_bytes"
   echo "job_slots=$job_slots"
   echo "execution_mode=$execution_mode"
+  echo "adaptive_restart_serial=$adaptive_restart_serial"
+  echo "qualification_projection=$qualification_projection"
+  echo "compression_projection=$compression_projection"
+  echo "operator_attention=$([[ -f "$run_results/operator-attention.env" ]] && echo yes || echo no)"
   echo "common_image=$image"
   echo "common_image_id=$(docker image inspect "$image" --format '{{.Id}}')"
   echo "dependency_build_image=$dependency_build_image"
@@ -800,6 +1183,9 @@ fi
   echo "Qualification image: $qualification_os_image"
   echo "Disk: $(hp_format_gb "$disk_limit_bytes")"
   echo "Execution mode: $execution_mode ($job_slots long-running job slots)"
+  if [[ -f "$run_results/operator-attention.env" ]]; then
+    echo "Operator attention issued: yes (see operator-attention.env)"
+  fi
   echo "Runtime executable policy: $runtime_exec_policy"
   echo "Cold cache: $cold_cache"
   echo "Results: $run_results"

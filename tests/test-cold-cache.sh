@@ -43,8 +43,14 @@ assert_formal_rejection() {
   grep -q -- "$expected" "$test_dir/rejection.stderr"
 }
 
-assert_formal_rejection 'formal cache control requires serial execution' \
-  "$project_dir/judging_assistance.sh" --jobs 2 /missing /missing
+set +e
+"$project_dir/judging_assistance.sh" --jobs 2 /missing /missing \
+  >"$test_dir/adaptive.stdout" 2>"$test_dir/adaptive.stderr"
+adaptive_exit=$?
+set -e
+(( adaptive_exit == 2 ))
+! grep -q 'formal cache control requires serial execution' \
+  "$test_dir/adaptive.stderr"
 assert_formal_rejection 'formal enwik9 runs require --cold-cache' \
   "$project_dir/compress-entry.sh" /missing /missing /missing
 
@@ -101,6 +107,15 @@ assert_create_evict_start_order() {
 
 assert_create_evict_start_order "$project_dir/qualify-archive.sh"
 assert_create_evict_start_order "$project_dir/compress-entry.sh"
+for runner in qualify-archive.sh compress-entry.sh; do
+  evict_line="$(grep -n 'hp_cold_cache_run ' "$project_dir/$runner" \
+    | tail -n 1 | cut -d: -f1)"
+  gate_line="$(grep -n 'hp_runtime_handoff_wait_for_gate ' \
+    "$project_dir/$runner" | tail -n 1 | cut -d: -f1)"
+  start_line="$(grep -n 'docker start "\$active_container"' \
+    "$project_dir/$runner" | head -n 1 | cut -d: -f1)"
+  (( evict_line < gate_line && gate_line < start_line ))
+done
 docker_access_line="$(grep -n '^require_docker_daemon$' \
   "$project_dir/judging_assistance.sh" | cut -d: -f1)"
 cold_lock_line="$(grep -n '^[[:space:]]*hp_cold_cache_acquire_lock ' \

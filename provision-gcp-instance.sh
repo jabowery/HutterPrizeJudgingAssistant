@@ -5,7 +5,7 @@ readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 
 instance_name=hutter-judging-node
 project=""
-machine_type=t2d-standard-4
+machine_type=t2d-standard-8
 region=us-central1
 boot_disk_size=200GB
 boot_disk_type=pd-ssd
@@ -30,7 +30,7 @@ The selected zone is the only value written to stdout; progress goes to stderr.
 Options:
   --name NAME                 Default: hutter-judging-node
   --project PROJECT           Default: active gcloud project
-  --machine-type TYPE         Default: t2d-standard-4 (16 GiB)
+  --machine-type TYPE         Default: t2d-standard-8 (32 GiB)
   --region REGION             Discover candidate zones here (default: us-central1)
   --zone ZONE                 Candidate zone; repeat to set an explicit order
   --boot-disk-size SIZE       Default: 200GB

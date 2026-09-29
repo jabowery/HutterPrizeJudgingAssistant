@@ -21,6 +21,7 @@ source "$project_dir/lib/resource-units.sh"
 [[ "$(hp_format_hms 360000)" == "100:00:00" ]]
 
 source "$project_dir/docker/runtime-report"
+source "$project_dir/lib/runtime-handoff.sh"
 [[ "$(hp_format_gib_runtime 10737418240)" == "10 GiB" ]]
 [[ "$(hp_format_gb_runtime 100000000000)" == "100 GB" ]]
 [[ "$(hp_format_hms_runtime 360000)" == "100:00:00" ]]
@@ -76,10 +77,12 @@ bash -c 'exec 3<"$1"; dd bs=1 count=25 <&3 >/dev/null 2>&1; sleep 30' \
 cursor_pid=$!
 sleep 1
 cursor_start="$(( $(date +%s) - 10 ))"
+cursor_machine_status="$cursor_dir/runtime-status.env"
 cursor_status_line="$(hp_emit_runtime_status \
   "$cursor_start" "$((cursor_start + 1000))" \
   14000000000 100000000000 17179869184 /tmp/hutter-output-does-not-exist \
-  unavailable unavailable "$cursor_dir" 2>&1)"
+  unavailable unavailable "$cursor_dir" "$cursor_machine_status" 2>&1)"
+cursor_machine_status_content="$(< "$cursor_machine_status")"
 kill "$cursor_pid" 2>/dev/null || true
 wait "$cursor_pid" 2>/dev/null || true
 rm -rf -- "$cursor_dir"
@@ -88,6 +91,8 @@ rm -rf -- "$cursor_dir"
 [[ "$cursor_status_line" =~ read-linear-projected-total=[0-9]+:[0-9]{2}:[0-9]{2} \
     && "$cursor_status_line" =~ read-linear-projected-margin=[+-][0-9]+:[0-9]{2}:[0-9]{2} ]] \
   || { echo "runtime status did not calculate read-cursor wall-time projection" >&2; exit 1; }
+[[ "$cursor_machine_status_content" == *$'projection_available=yes\nprojection_basis=read-cursor\nprojection_overflow=no'* ]] \
+  || { echo "runtime status did not write trusted machine-readable projection" >&2; exit 1; }
 readonly_collision_status="$(
   readonly start_epoch="$runtime_status_start"
   readonly deadline_epoch="$((runtime_status_start + 60))"
@@ -114,6 +119,25 @@ grep -q -- '--env "CGROUP_LIMIT_BYTES=$HP_EXECUTION_RAM_BYTES"' \
   "$project_dir/compress-entry.sh"
 grep -q -- '--env "CGROUP_LIMIT_BYTES=$HP_EXECUTION_RAM_BYTES"' \
   "$project_dir/qualify-archive.sh"
+
+handoff_dir="$(mktemp -d)"
+handoff_gate="$handoff_dir/start.gate"
+handoff_ready="$handoff_dir/worker.ready"
+(
+  hp_runtime_handoff_wait_for_gate "$handoff_gate" "$handoff_ready"
+) &
+handoff_pid=$!
+for _ in {1..50}; do
+  [[ -f "$handoff_ready" ]] && break
+  sleep 0.02
+done
+[[ -f "$handoff_ready" ]] \
+  || { echo "runtime handoff did not report readiness" >&2; exit 1; }
+kill -0 "$handoff_pid" 2>/dev/null \
+  || { echo "runtime handoff did not wait at the start gate" >&2; exit 1; }
+printf 'start\n' > "$handoff_gate"
+wait "$handoff_pid"
+rm -rf -- "$handoff_dir"
 
 qualify_help="$($project_dir/qualify-archive.sh --help)"
 [[ "$qualify_help" == *"default: 10 GiB"* ]]

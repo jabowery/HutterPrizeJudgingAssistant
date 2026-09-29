@@ -10,6 +10,7 @@ source "$script_dir/lib/qualification-os.sh"
 source "$script_dir/lib/entry-env.sh"
 source "$script_dir/lib/entry-location.sh"
 source "$script_dir/lib/host-dependencies.sh"
+source "$script_dir/lib/runtime-handoff.sh"
 
 image=""
 qualification_os=""
@@ -39,6 +40,9 @@ skip_build=false
 skip_storage_preflight=false
 keep_work=false
 container_id_file=""
+status_path_file=""
+start_gate=""
+ready_file=""
 cold_cache=false
 cold_cache_helper=""
 declare -a selected_entries=()
@@ -90,6 +94,9 @@ Options:
   --preflight-only           Inventory and score without executing submissions
   --keep-work                Keep per-entry Docker volumes for inspection
   --container-id-file FILE   Internal active-container handoff for parent cleanup
+  --status-path-file FILE    Internal live-status path handoff
+  --start-gate FILE          Internal coordinated-start gate
+  --ready-file FILE          Internal coordinated-start readiness handoff
   --cold-cache-helper FILE   Internal trusted residency-verifier handoff
   -h, --help                 Show this help
 
@@ -319,6 +326,21 @@ while (( $# > 0 )); do
       container_id_file="$2"
       shift 2
       ;;
+    --status-path-file)
+      require_value "$@"
+      status_path_file="$2"
+      shift 2
+      ;;
+    --start-gate)
+      require_value "$@"
+      start_gate="$2"
+      shift 2
+      ;;
+    --ready-file)
+      require_value "$@"
+      ready_file="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -373,6 +395,15 @@ if [[ -n "$container_id_file" ]]; then
     || die "invalid container ID file directory: $container_id_parent"
   container_id_file="$(realpath --canonicalize-missing -- "$container_id_file")"
 fi
+if [[ -n "$start_gate" || -n "$ready_file" ]]; then
+  [[ -n "$start_gate" && -n "$ready_file" ]] \
+    || usage_error "--start-gate and --ready-file must be used together"
+fi
+status_path_file="$(hp_runtime_handoff_output_path \
+  "$status_path_file" "status path file")" || exit 2
+ready_file="$(hp_runtime_handoff_output_path \
+  "$ready_file" "ready file")" || exit 2
+start_gate="$(hp_runtime_handoff_gate_path "$start_gate")" || exit 2
 [[ "$cpu_limit" =~ ^[0-9]+([.][0-9]+)?$ ]] || usage_error "cpus must be a positive number"
 awk -v cpus="$cpu_limit" 'BEGIN { exit !(cpus > 0) }' \
   || usage_error "cpus must be greater than zero"
@@ -523,11 +554,16 @@ if [[ "$preflight_only" != true ]]; then
 
   if [[ "$automatic_geekbench" == true ]]; then
     geekbench_calibration_results="$run_results/geekbench-calibration"
+    geekbench_storage_options=()
+    if [[ "$skip_storage_preflight" == true ]]; then
+      geekbench_storage_options=(--skip-storage-preflight)
+    fi
     echo "Running automatic Geekbench 5 calibration for archive qualification..." >&2
     if ! geekbench_score="$("$script_dir/benchmark.sh" \
         --image "$image" \
         --qualification-os "$qualification_os" \
         --results "$geekbench_calibration_results" \
+        "${geekbench_storage_options[@]}" \
         --skip-build)"; then
       die "automatic Geekbench calibration failed"
     fi
@@ -743,6 +779,14 @@ for entry_dir in "${entry_dirs[@]}"; do
     --env "PAYLOAD_NAME=$payload_name" \
     "$image" /usr/local/bin/init-work
 
+  if [[ -n "$status_path_file" ]]; then
+    [[ -n "$active_work_dir" ]] \
+      || die "--status-path-file requires bind-mounted --work-root storage"
+    printf '%s\n' "$active_work_dir/report/runtime-status.env" \
+      > "$status_path_file"
+    chmod 0400 -- "$status_path_file"
+  fi
+
   cold_cache_target=""
   cold_cache_target_role=""
   cold_cache_target_bytes=""
@@ -807,6 +851,7 @@ for entry_dir in "${entry_dirs[@]}"; do
       "$cold_cache_target_role" \
       || die "cold-cache eviction or zero-residency verification failed"
   fi
+  hp_runtime_handoff_wait_for_gate "$start_gate" "$ready_file"
   docker start "$active_container" >/dev/null
   docker logs --follow "$active_container" &
   active_log_follower=$!

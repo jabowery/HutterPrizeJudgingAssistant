@@ -45,7 +45,8 @@ formal run from such a pointer-only archive.
 
 A formal run requires:
 
-- an x86-64 Linux host with at least 16 GiB RAM;
+- an x86-64 Linux host with at least 16 GiB RAM for serial execution, or 32
+  GiB for the default adaptive two-worker workflow;
 - a maintained Linux kernel providing seccomp, `no_new_privs`, Landlock ABI 3
   or newer, and an enforcing AppArmor or SELinux container profile;
 - `git` to obtain the recommended clone and permission to use `sudo` for
@@ -81,9 +82,11 @@ not a supported working location. The public, noncompetitive fixture remains
 available at `examples/well-formed-entry`.
 
 For the default one-billion-byte `enwik9` run, the orchestrator automatically
-uses serial execution, process-tree accounting, cold-cache eviction and
-verification, automatic Geekbench calibration, and a `Work/` directory on the
-repository filesystem. If that filesystem lacks 100 GB free, use
+uses adaptive two-worker screening when the host has enough RAM, falling back
+to serial execution otherwise. It also enables process-tree accounting,
+cold-cache eviction and verification, automatic Geekbench calibration, and a
+`Work/` directory on the repository filesystem. If that filesystem lacks 100
+GB free, use
 `--work-root DIR` to select another local filesystem. `--geekbench-score N`
 reuses a separately verified Geekbench 5 single-core score. The explicit
 resource, concurrency, cache, and strict-execution options remain available for
@@ -117,9 +120,10 @@ credentials already selected in the invoking environment:
 The launcher performs the following trusted operations before entrant code is
 handled:
 
-1. Tries zones in `us-central1` until a `t2d-standard-4` can be allocated.
-2. Creates a Shielded Ubuntu 24.04 instance with a 200 GB SSD, at least 16 GiB
-   RAM, no attached service account, and no OAuth scopes.
+1. Tries zones in `us-central1` until a `t2d-standard-8` can be allocated.
+2. Creates a Shielded Ubuntu 24.04 instance with a 200 GB SSD, enough RAM for
+   two 16 GiB execution environments, no attached service account, and no
+   OAuth scopes.
 3. Applies Ubuntu updates, reboots into the updated kernel, and installs Docker,
    Git LFS, tmux, and the ordinary host utilities.
 4. Clones and records the selected judging-system revision and transfers the
@@ -150,12 +154,36 @@ guidance during stages that defer output creation.
 
 Use wall elapsed, not CPU time, for a cloud-cost decision. Both projections are
 operational telemetry, not formal or guaranteed codec-completion percentages,
-and the judging system never terminates an entry from a projection. Output may
-be nonlinear; the read-cursor fallback may be unavailable or misleading for
-memory-mapped, positional, random, repeated, or multi-file I/O. An operator may
-use the evidence to stop an uneconomic run, while only a completed measurement
+and the judging system never declares a formal failure from a projection.
+Output may be nonlinear; the read-cursor fallback may be unavailable or
+misleading for memory-mapped, positional, random, repeated, or multi-file I/O.
+An operator may use the evidence to stop an uneconomic run, while only a completed measurement
 can establish the formal time result. The formal process-tree peak-RSS result
 likewise remains the post-run measurement recorded in the evidence.
+
+For a full submission, the default scheduler prepares the submitted
+decompressor and rebuilt compressor independently, evicts and verifies both
+inputs while neither container is running, and then releases both through one
+start gate. It requires two consecutive one-minute projections beyond the
+allowance before treating an early projection as a parallel-overflow signal.
+That signal cancels both diagnostic attempts and restarts submitted
+decompression serially so contention cannot decide qualification.
+
+If two consecutive decompressor status samples provide neither output-size nor
+kernel read-cursor progress, the scheduler stops that attempt and observes the
+compressor instead. If the compressor is also unobservable, it continues to
+run but the system emits an `OPERATOR_ATTENTION:` log record and writes
+`operator-attention.env`; an external watchdog can alert the human judge, who
+chooses whether to continue or terminate. A projection never causes a formal
+failure by itself. `--serial` disables this adaptive scheduling. Because two
+16 GiB execution cgroups cannot safely coexist on a 16 GiB host, adaptive mode
+requires at least 32 GiB of host RAM and automatically falls back to serial on
+a smaller machine.
+
+The cloud launcher prints a ready-to-run `Watch:` command. Its desktop
+watchdog polls only the trusted log marker, rings the terminal bell, and uses
+`notify-send` when available; it does not make or execute the human official's
+decision.
 
 The 200 GB boot-disk default is intentional. The worker must still have the
 full 100 GB run allowance free after the operating system, Docker images,
@@ -164,12 +192,12 @@ space; a nominal 120 GB boot disk can fail that precondition.
 
 For an entry whose declared storage behavior warrants a local NVMe work
 filesystem, select a machine type and disk explicitly. For example, the
-following requests C2D with 16 GiB RAM, one hardware thread per core, and one
+following requests C2D with 32 GiB RAM, one hardware thread per core, and one
 ephemeral Local SSD:
 
 ```bash
 ./launch-cloud-judging.sh \
-  --machine-type c2d-highcpu-8 \
+  --machine-type c2d-standard-8 \
   --threads-per-core 1 \
   --local-ssd-nvme \
   --boot-disk-size 90GB \
@@ -262,7 +290,7 @@ utility:
 ```bash
 ./provision-gcp-instance.sh \
   --name hutter-judging-node \
-  --machine-type t2d-standard-4 \
+  --machine-type t2d-standard-8 \
   --region us-central1 \
   --boot-disk-size 200GB
 ```
@@ -367,10 +395,12 @@ for eviction. It also warns that this operation can cause performance problems,
 which is why it is confined to controlled formal testing. See the
 [Linux kernel `drop_caches` documentation](https://docs.kernel.org/admin-guide/sysctl/vm.html#drop-caches).
 
-A host-wide lock is held for the complete cache-controlled run. A second
-cache-controlled run is refused, and `--cold-cache` rejects `--jobs 2`, so no
-orchestrator eviction can occur while another formal timed process is running.
-Each timed phase records its target size and SHA-256, inode identity, eviction
+A host-wide lock is held for the complete cache-controlled run, and a second
+cache-controlled run is refused. In adaptive two-worker mode both containers
+are created first, both targets are evicted and verified while the containers
+wait at a common gate, and only then are the two timed processes released. No
+orchestrator eviction therefore occurs while a timed process is running. Each
+timed phase records its target size and SHA-256, inode identity, eviction
 timestamps, page count, resident-page count, and verifier digest in
 `cold-cache.env`. The host conditions are recorded in `cold-cache-host.env`.
 

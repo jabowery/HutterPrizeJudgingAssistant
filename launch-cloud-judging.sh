@@ -12,7 +12,7 @@ readonly canonical_enwik9_sha256=159b85351e5f76e60cbe32e04c677847a9ecba3adc79add
 
 instance_name=hutter-judging-node
 project=""
-machine_type=t2d-standard-4
+machine_type=t2d-standard-8
 region=us-central1
 boot_disk_size=200GB
 boot_disk_type=pd-ssd
@@ -59,7 +59,7 @@ separate submission directory on the cloud host, never into the cloned repo.
 Cloud options:
   --instance-name NAME       Default: hutter-judging-node
   --project PROJECT          Default: active gcloud project
-  --machine-type TYPE        Default: t2d-standard-4
+  --machine-type TYPE        Default: t2d-standard-8
   --region REGION            Default: us-central1
   --zone ZONE                Candidate zone; repeat to set an explicit order
   --boot-disk-size SIZE      Default: 200GB
@@ -621,6 +621,8 @@ printf 'Mode: %s\n' "$([[ "$source_only" == true ]] && echo source-only || echo 
 printf 'Local launch record: %s\n' "$launch_record"
 printf 'Attach: gcloud compute ssh %q --zone=%q --project=%q -- -t %q\n' \
   "$instance_name" "$selected_zone" "$project" "tmux attach-session -t $tmux_session"
+printf 'Watch: ./scripts/watch-cloud-judging.sh --instance %q --zone %q --project %q --remote-log %q\n' \
+  "$instance_name" "$selected_zone" "$project" "$remote_log"
 printf 'Copy results: gcloud compute scp --recurse --zone=%q --project=%q %q %q\n' \
   "$selected_zone" "$project" "$instance_name:$remote_repo/Results" ./
 printf 'Delete when finished: gcloud compute instances delete %q --zone=%q --project=%q\n' \

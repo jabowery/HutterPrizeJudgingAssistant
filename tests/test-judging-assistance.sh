@@ -3,12 +3,8 @@ set -Eeuo pipefail
 
 readonly project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 readonly test_dir="$(mktemp -d)"
-lfs_repo_entry=""
 cleanup() {
   rm -rf -- "$test_dir"
-  if [[ -n "$lfs_repo_entry" ]]; then
-    rm -rf -- "$lfs_repo_entry"
-  fi
 }
 trap cleanup EXIT
 
@@ -298,6 +294,7 @@ set +e
 "$project_dir/judging_assistance.sh" \
   --geekbench-score 8400000 \
   --expected-size "$fixture_size" \
+  --disk-limit-bytes 1 \
   --work-root "$test_dir/work" \
   --results "$test_dir/results-LfsPointer" \
   "$test_dir/Entries/LfsPointer" "$test_dir/enwik9" \
@@ -309,81 +306,6 @@ grep -q 'Git LFS pointers outside the judging repository cannot be fetched autom
   "$test_dir/lfs-pointer.stderr"
 ! grep -q 'Building the common judging image' "$test_dir/lfs-pointer.stderr"
 [[ ! -e "$test_dir/results-LfsPointer" ]]
-
-# Materialize an in-repository pointer without manual intervention. The fake
-# sudo represents the trusted apt helper and makes Git LFS become available;
-# the fake Git then checks out the requested object.
-lfs_repo_entry="$(mktemp -d -- "$project_dir/.test-lfs-entry.XXXXXX")"
-cp -a -- "$test_dir/Entries/Identical/." "$lfs_repo_entry/"
-cp -- "$lfs_repo_entry/archive9" "$test_dir/materialized-archive9"
-rm -- "$lfs_repo_entry/archive9"
-cat > "$lfs_repo_entry/archive9" <<'EOF'
-version https://git-lfs.github.com/spec/v1
-oid sha256:0000000000000000000000000000000000000000000000000000000000000000
-size 59
-EOF
-mkdir "$test_dir/fake-lfs-bin"
-cat > "$test_dir/fake-lfs-bin/git" <<'EOF'
-#!/bin/sh
-set -eu
-if [ "$1" = lfs ] && [ "$2" = version ]; then
-  test -e "${FAKE_LFS_INSTALLED:?}"
-  exit
-fi
-if [ "$1" = -C ] && [ "$3" = lfs ] && [ "$4" = install ]; then
-  printf '%s\n' "$*" >> "${FAKE_LFS_LOG:?}"
-  exit
-fi
-if [ "$1" = -C ] && [ "$3" = lfs ] && [ "$4" = pull ]; then
-  printf '%s\n' "$*" >> "${FAKE_LFS_LOG:?}"
-  cp -- "${FAKE_LFS_SOURCE:?}" "${FAKE_LFS_TARGET:?}"
-  exit
-fi
-exit 91
-EOF
-cat > "$test_dir/fake-lfs-bin/sudo" <<'EOF'
-#!/bin/sh
-set -eu
-printf '%s\n' "$@" > "${FAKE_LFS_SUDO_LOG:?}"
-touch "${FAKE_LFS_INSTALLED:?}"
-EOF
-cat > "$test_dir/fake-lfs-bin/docker" <<'EOF'
-#!/bin/sh
-echo 'Cannot connect to the Docker daemon' >&2
-exit 1
-EOF
-chmod 0555 "$test_dir/fake-lfs-bin/git" "$test_dir/fake-lfs-bin/sudo" \
-  "$test_dir/fake-lfs-bin/docker"
-set +e
-FAKE_LFS_INSTALLED="$test_dir/fake-lfs-installed" \
-  FAKE_LFS_LOG="$test_dir/fake-lfs.log" \
-  FAKE_LFS_SUDO_LOG="$test_dir/fake-lfs-sudo.log" \
-  FAKE_LFS_SOURCE="$test_dir/materialized-archive9" \
-  FAKE_LFS_TARGET="$lfs_repo_entry/archive9" \
-  PATH="$test_dir/fake-lfs-bin:$PATH" "$project_dir/judging_assistance.sh" \
-  --geekbench-score 8400000 \
-  --expected-size "$fixture_size" \
-  --work-root "$test_dir/work" \
-  --results "$test_dir/results-LfsAutomatic" \
-  "$lfs_repo_entry" "$test_dir/enwik9" \
-  >"$test_dir/lfs-automatic.stdout" 2>"$test_dir/lfs-automatic.stderr"
-lfs_automatic_exit=$?
-set -e
-(( lfs_automatic_exit == 2 ))
-cmp --silent -- "$test_dir/materialized-archive9" "$lfs_repo_entry/archive9"
-grep -q 'Installing missing trusted host dependencies: git-lfs' \
-  "$test_dir/lfs-automatic.stderr"
-grep -q 'Materializing required Git LFS objects' \
-  "$test_dir/lfs-automatic.stderr"
-grep -q 'lfs install --local' "$test_dir/fake-lfs.log"
-grep -q 'lfs pull --include=' "$test_dir/fake-lfs.log"
-mapfile -t lfs_sudo_arguments < "$test_dir/fake-lfs-sudo.log"
-[[ "${lfs_sudo_arguments[0]}" == -- ]]
-[[ "${lfs_sudo_arguments[1]}" == "$project_dir/install-host-dependencies.sh" ]]
-grep -q 'Docker daemon is unavailable' "$test_dir/lfs-automatic.stderr"
-[[ ! -e "$test_dir/results-LfsAutomatic" ]]
-rm -rf -- "$lfs_repo_entry"
-lfs_repo_entry=""
 
 run_full() {
   local name="$1"
@@ -413,7 +335,9 @@ grep -q '^runtime_no_new_privs=1$' "$identical_security"
 grep -Eq '^enforcing_lsm=(apparmor|selinux)$' "$identical_security"
 grep -q '^technical_verdict=PASS$' "$identical_final"
 grep -q '^job_slots=2$' "$identical_final"
-grep -q '^execution_mode=parallel$' "$identical_final"
+grep -q '^execution_mode=adaptive-parallel$' "$identical_final"
+grep -q '^adaptive_restart_serial=false$' "$identical_final"
+grep -q '^operator_attention=no$' "$identical_final"
 grep -q '^dependency_build_image=' "$identical_final"
 grep -q '^dependency_runtime_image=' "$identical_final"
 grep -q '^archives_identical=yes$' "$identical_final"

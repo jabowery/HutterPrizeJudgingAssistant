@@ -175,14 +175,21 @@ hp_emit_runtime_status() {
   local hp_rr_cgroup_cpu_start_usec="$7"
   local hp_rr_expected_output_bytes="${8:-unavailable}"
   local hp_rr_run_dir="${9:-/work/run}"
+  local hp_rr_status_file="${10:-}"
   local hp_rr_now_epoch hp_rr_elapsed_seconds hp_rr_remaining_seconds
   local hp_rr_cgroup_current hp_rr_cgroup_cpu_current_usec
   local hp_rr_cpu_elapsed_seconds hp_rr_output_state hp_rr_output_bytes
   local hp_rr_progress hp_rr_projected_seconds hp_rr_projection_margin
+  local hp_rr_projected_seconds_raw=unavailable
+  local hp_rr_projection_margin_raw=unavailable
   local hp_rr_allowance_seconds
   local hp_rr_cursor hp_rr_cursor_name hp_rr_cursor_position hp_rr_cursor_size
   local hp_rr_cursor_state hp_rr_cursor_progress hp_rr_cursor_projected_seconds
   local hp_rr_cursor_projection_margin
+  local hp_rr_cursor_projected_seconds_raw=unavailable
+  local hp_rr_cursor_projection_margin_raw=unavailable
+  local hp_rr_projection_available=no hp_rr_projection_basis=unavailable
+  local hp_rr_projection_overflow=unavailable hp_rr_status_temporary
 
   hp_rr_now_epoch="$(date +%s)"
   hp_rr_elapsed_seconds="$((hp_rr_now_epoch - hp_rr_start_epoch))"
@@ -225,7 +232,9 @@ hp_emit_runtime_status() {
       -v elapsed="$hp_rr_elapsed_seconds" -v current="$hp_rr_output_bytes" \
       -v expected="$hp_rr_expected_output_bytes" \
       'BEGIN { print int(elapsed * expected / current + 0.999999) }')"
+    hp_rr_projected_seconds_raw="$hp_rr_projected_seconds"
     hp_rr_projection_margin="$((hp_rr_allowance_seconds - hp_rr_projected_seconds))"
+    hp_rr_projection_margin_raw="$hp_rr_projection_margin"
     hp_rr_projected_seconds="$(hp_format_hms_runtime "$hp_rr_projected_seconds")"
     hp_rr_projection_margin="$(hp_format_signed_hms_runtime "$hp_rr_projection_margin")"
   fi
@@ -246,10 +255,58 @@ hp_emit_runtime_status() {
         -v elapsed="$hp_rr_elapsed_seconds" -v current="$hp_rr_cursor_position" \
         -v expected="$hp_rr_cursor_size" \
         'BEGIN { print int(elapsed * expected / current + 0.999999) }')"
+      hp_rr_cursor_projected_seconds_raw="$hp_rr_cursor_projected_seconds"
       hp_rr_cursor_projection_margin="$((hp_rr_allowance_seconds - hp_rr_cursor_projected_seconds))"
+      hp_rr_cursor_projection_margin_raw="$hp_rr_cursor_projection_margin"
       hp_rr_cursor_projected_seconds="$(hp_format_hms_runtime "$hp_rr_cursor_projected_seconds")"
       hp_rr_cursor_projection_margin="$(hp_format_signed_hms_runtime "$hp_rr_cursor_projection_margin")"
     fi
+  fi
+
+  if [[ "$hp_rr_projected_seconds_raw" =~ ^[0-9]+$ ]]; then
+    hp_rr_projection_available=yes
+    hp_rr_projection_basis=output
+    if (( hp_rr_projection_margin_raw < 0 )); then
+      hp_rr_projection_overflow=yes
+    else
+      hp_rr_projection_overflow=no
+    fi
+  elif [[ "$hp_rr_cursor_projected_seconds_raw" =~ ^[0-9]+$ ]]; then
+    hp_rr_projection_available=yes
+    hp_rr_projection_basis=read-cursor
+    if (( hp_rr_cursor_projection_margin_raw < 0 )); then
+      hp_rr_projection_overflow=yes
+    else
+      hp_rr_projection_overflow=no
+    fi
+  fi
+
+  if [[ -n "$hp_rr_status_file" ]]; then
+    hp_rr_status_temporary="${hp_rr_status_file}.tmp.$$"
+    {
+      printf 'sample_epoch=%s\n' "$hp_rr_now_epoch"
+      printf 'wall_elapsed_seconds=%s\n' "$hp_rr_elapsed_seconds"
+      printf 'allowance_seconds=%s\n' "$hp_rr_allowance_seconds"
+      printf 'output_bytes=%s\n' "$hp_rr_output_bytes"
+      printf 'expected_output_bytes=%s\n' "$hp_rr_expected_output_bytes"
+      printf 'output_projected_total_seconds=%s\n' \
+        "$hp_rr_projected_seconds_raw"
+      printf 'output_projected_margin_seconds=%s\n' \
+        "$hp_rr_projection_margin_raw"
+      printf 'read_cursor_name=%s\n' "${hp_rr_cursor_name:-unavailable}"
+      printf 'read_cursor_position=%s\n' \
+        "${hp_rr_cursor_position:-unavailable}"
+      printf 'read_cursor_size=%s\n' "${hp_rr_cursor_size:-unavailable}"
+      printf 'read_projected_total_seconds=%s\n' \
+        "$hp_rr_cursor_projected_seconds_raw"
+      printf 'read_projected_margin_seconds=%s\n' \
+        "$hp_rr_cursor_projection_margin_raw"
+      printf 'projection_available=%s\n' "$hp_rr_projection_available"
+      printf 'projection_basis=%s\n' "$hp_rr_projection_basis"
+      printf 'projection_overflow=%s\n' "$hp_rr_projection_overflow"
+    } > "$hp_rr_status_temporary"
+    chmod 0400 -- "$hp_rr_status_temporary"
+    mv -- "$hp_rr_status_temporary" "$hp_rr_status_file"
   fi
 
   printf 'STATUS: wall-elapsed=%s wall-remaining=%s cpu-used=%s disk=%s/%s cgroup-current=%s/%s output=%s expected-output-bytes=%s linear-progress=%s linear-projected-total=%s linear-projected-margin=%s read-cursor=%s read-linear-progress=%s read-linear-projected-total=%s read-linear-projected-margin=%s\n' \

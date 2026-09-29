@@ -79,6 +79,7 @@ FAKE_SLEEP_LOG="$test_root/sleep.log" \
 PATH="$test_root/bin:$PATH" \
   "$project_dir/benchmark.sh" \
     --skip-build \
+    --skip-storage-preflight \
     --results "$test_root/results" \
     > "$test_root/stdout.log" \
     2> "$test_root/stderr.log"

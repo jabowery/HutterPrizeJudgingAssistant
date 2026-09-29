@@ -10,6 +10,13 @@ fail() {
   exit 1
 }
 
+grep -q '^machine_type=t2d-standard-8$' \
+  "$project_dir/launch-cloud-judging.sh" \
+  || fail "cloud launcher does not default to the 32 GiB adaptive shape"
+grep -q '^machine_type=t2d-standard-8$' \
+  "$project_dir/provision-gcp-instance.sh" \
+  || fail "cloud provisioner does not default to the 32 GiB adaptive shape"
+
 fake_bin="$test_root/bin"
 mkdir -p -- "$fake_bin"
 cat > "$fake_bin/gcloud" <<'EOF'
@@ -267,7 +274,33 @@ grep -Fq "printf '%s\\n' Judging" "$generated_runner" \
 PATH="$fake_bin:$PATH" HOME="$tmux_home" \
   "$project_dir/scripts/run-in-tmux.sh" \
     --session cloud-test --history-limit 100000 --workdir "$tmux_work" \
-    -- printf '%s\n' retry > "$test_root/tmux-retry.stdout" \
+  -- printf '%s\n' retry > "$test_root/tmux-retry.stdout" \
   || fail "tmux runner could not replace a prior mode-0500 run script"
+
+chmod 0700 -- "$fake_bin/gcloud"
+cat > "$fake_bin/gcloud" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' 'OPERATOR_ATTENTION: phase=compression reason=test'
+EOF
+cat > "$fake_bin/notify-send" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "$WATCHDOG_NOTIFY_LOG"
+EOF
+chmod 0500 -- "$fake_bin/gcloud" "$fake_bin/notify-send"
+export WATCHDOG_NOTIFY_LOG="$test_root/watchdog-notify.log"
+set +e
+PATH="$fake_bin:$PATH" "$project_dir/scripts/watch-cloud-judging.sh" \
+  --instance cloud-test --zone us-central1-a --project example-project \
+  --remote-log /home/operator/results.log --poll-seconds 1 \
+  >"$test_root/watchdog.stdout" 2>"$test_root/watchdog.stderr"
+watchdog_exit=$?
+set -e
+[[ "$watchdog_exit" == 3 ]] \
+  || fail "desktop watchdog did not stop with its attention status"
+grep -q 'OPERATOR_ATTENTION: phase=compression reason=test' \
+  "$test_root/watchdog.stderr" \
+  || fail "desktop watchdog did not display the operator-attention record"
+grep -q 'Hutter Prize judging needs attention' "$WATCHDOG_NOTIFY_LOG" \
+  || fail "desktop watchdog did not request a desktop notification"
 
 echo "cloud launch tests passed"
