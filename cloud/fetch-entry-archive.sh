@@ -32,4 +32,8 @@ if [[ -n "$expected_sha256" && "$actual_sha256" != "$expected_sha256" ]]; then
   exit 1
 fi
 mv -f -- "$temporary" "$output"
+# The next handoff mounts this verified artifact read-only into a container
+# whose contestant-side validator is UID 65532. mktemp creates mode 0600,
+# which would prevent that reader from opening the otherwise valid archive.
+chmod 0644 -- "$output"
 printf '%s\n' "$actual_sha256"

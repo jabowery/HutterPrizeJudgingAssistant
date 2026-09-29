@@ -35,6 +35,8 @@ actual_sha256="$(PATH="$test_root/bin:$PATH" \
   || fail "fetch helper did not report the downloaded digest"
 [[ "$(< "$output")" == 'submitted archive bytes' ]] \
   || fail "fetch helper did not install the downloaded archive"
+[[ "$(stat --format='%a' "$output")" == 644 ]] \
+  || fail "fetch helper did not make the verified artifact readable for container handoff"
 
 if PATH="$test_root/bin:$PATH" "$project_dir/cloud/fetch-entry-archive.sh" \
     https://downloads.example.invalid/archive9 "$test_root/wrong" \
