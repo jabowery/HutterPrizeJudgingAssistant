@@ -116,49 +116,50 @@ hp_format_hms_runtime() {
 }
 
 hp_emit_runtime_status() {
-  local start_epoch="$1"
-  local deadline_epoch="$2"
-  local disk_bytes="$3"
-  local disk_limit_bytes="$4"
-  local cgroup_limit_bytes="$5"
-  local output_path="$6"
-  local cgroup_cpu_start_usec="$7"
-  local now_epoch elapsed_seconds remaining_seconds cgroup_current cgroup_cpu_current_usec
-  local cpu_elapsed_seconds output_state
+  local hp_rr_start_epoch="$1"
+  local hp_rr_deadline_epoch="$2"
+  local hp_rr_disk_bytes="$3"
+  local hp_rr_disk_limit_bytes="$4"
+  local hp_rr_cgroup_limit_bytes="$5"
+  local hp_rr_output_path="$6"
+  local hp_rr_cgroup_cpu_start_usec="$7"
+  local hp_rr_now_epoch hp_rr_elapsed_seconds hp_rr_remaining_seconds
+  local hp_rr_cgroup_current hp_rr_cgroup_cpu_current_usec
+  local hp_rr_cpu_elapsed_seconds hp_rr_output_state
 
-  now_epoch="$(date +%s)"
-  elapsed_seconds="$((now_epoch - start_epoch))"
-  (( elapsed_seconds >= 0 )) || elapsed_seconds=0
-  remaining_seconds="$((deadline_epoch - now_epoch))"
-  (( remaining_seconds >= 0 )) || remaining_seconds=0
-  cgroup_current="$(hp_read_cgroup_current)"
-  if [[ "$cgroup_current" =~ ^[0-9]+$ ]]; then
-    cgroup_current="$(hp_format_gib_runtime "$cgroup_current")"
+  hp_rr_now_epoch="$(date +%s)"
+  hp_rr_elapsed_seconds="$((hp_rr_now_epoch - hp_rr_start_epoch))"
+  (( hp_rr_elapsed_seconds >= 0 )) || hp_rr_elapsed_seconds=0
+  hp_rr_remaining_seconds="$((hp_rr_deadline_epoch - hp_rr_now_epoch))"
+  (( hp_rr_remaining_seconds >= 0 )) || hp_rr_remaining_seconds=0
+  hp_rr_cgroup_current="$(hp_read_cgroup_current)"
+  if [[ "$hp_rr_cgroup_current" =~ ^[0-9]+$ ]]; then
+    hp_rr_cgroup_current="$(hp_format_gib_runtime "$hp_rr_cgroup_current")"
   fi
-  cgroup_cpu_current_usec="$(hp_read_cgroup_cpu_usage_usec)"
-  if [[ "$cgroup_cpu_start_usec" =~ ^[0-9]+$ \
-      && "$cgroup_cpu_current_usec" =~ ^[0-9]+$ ]]; then
-    cpu_elapsed_seconds="$(((cgroup_cpu_current_usec - cgroup_cpu_start_usec) / 1000000))"
-    (( cpu_elapsed_seconds >= 0 )) || cpu_elapsed_seconds=0
-    cgroup_cpu_current_usec="$(hp_format_hms_runtime "$cpu_elapsed_seconds")"
+  hp_rr_cgroup_cpu_current_usec="$(hp_read_cgroup_cpu_usage_usec)"
+  if [[ "$hp_rr_cgroup_cpu_start_usec" =~ ^[0-9]+$ \
+      && "$hp_rr_cgroup_cpu_current_usec" =~ ^[0-9]+$ ]]; then
+    hp_rr_cpu_elapsed_seconds="$(((hp_rr_cgroup_cpu_current_usec - hp_rr_cgroup_cpu_start_usec) / 1000000))"
+    (( hp_rr_cpu_elapsed_seconds >= 0 )) || hp_rr_cpu_elapsed_seconds=0
+    hp_rr_cgroup_cpu_current_usec="$(hp_format_hms_runtime "$hp_rr_cpu_elapsed_seconds")"
   else
-    cgroup_cpu_current_usec=unavailable
+    hp_rr_cgroup_cpu_current_usec=unavailable
   fi
-  if [[ -f "$output_path" && ! -L "$output_path" ]]; then
-    output_state="$(basename -- "$output_path")=$(stat --format='%s' -- "$output_path") bytes"
+  if [[ -f "$hp_rr_output_path" && ! -L "$hp_rr_output_path" ]]; then
+    hp_rr_output_state="$(basename -- "$hp_rr_output_path")=$(stat --format='%s' -- "$hp_rr_output_path") bytes"
   else
-    output_state="$(basename -- "$output_path")=not-created"
+    hp_rr_output_state="$(basename -- "$hp_rr_output_path")=not-created"
   fi
 
   printf 'STATUS: wall-elapsed=%s wall-remaining=%s cpu-used=%s disk=%s/%s cgroup-current=%s/%s output=%s\n' \
-    "$(hp_format_hms_runtime "$elapsed_seconds")" \
-    "$(hp_format_hms_runtime "$remaining_seconds")" \
-    "$cgroup_cpu_current_usec" \
-    "$(hp_format_gb_runtime "$disk_bytes")" \
-    "$(hp_format_gb_runtime "$disk_limit_bytes")" \
-    "$cgroup_current" \
-    "$(hp_format_gib_runtime "$cgroup_limit_bytes")" \
-    "$output_state" >&2
+    "$(hp_format_hms_runtime "$hp_rr_elapsed_seconds")" \
+    "$(hp_format_hms_runtime "$hp_rr_remaining_seconds")" \
+    "$hp_rr_cgroup_cpu_current_usec" \
+    "$(hp_format_gb_runtime "$hp_rr_disk_bytes")" \
+    "$(hp_format_gb_runtime "$hp_rr_disk_limit_bytes")" \
+    "$hp_rr_cgroup_current" \
+    "$(hp_format_gib_runtime "$hp_rr_cgroup_limit_bytes")" \
+    "$hp_rr_output_state" >&2
 }
 
 hp_gnu_time_elapsed_seconds() {

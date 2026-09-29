@@ -35,6 +35,20 @@ runtime_status_line="$(hp_emit_runtime_status \
   || { echo "runtime status did not report disk allocation" >&2; exit 1; }
 [[ "$runtime_status_line" == *'output=hutter-output-does-not-exist=not-created' ]] \
   || { echo "runtime status did not report output state" >&2; exit 1; }
+readonly_collision_status="$(
+  readonly start_epoch="$runtime_status_start"
+  readonly deadline_epoch="$((runtime_status_start + 60))"
+  readonly disk_bytes=14000000000
+  readonly disk_limit_bytes=100000000000
+  readonly cgroup_limit_bytes=17179869184
+  readonly output_path=/tmp/hutter-output-does-not-exist
+  readonly cgroup_cpu_start_usec=unavailable
+  hp_emit_runtime_status \
+    "$start_epoch" "$deadline_epoch" "$disk_bytes" "$disk_limit_bytes" \
+    "$cgroup_limit_bytes" "$output_path" "$cgroup_cpu_start_usec" 2>&1
+)"
+[[ "$readonly_collision_status" == STATUS:* ]] \
+  || { echo "runtime status collided with readonly caller variables" >&2; exit 1; }
 grep -q '^readonly status_interval_seconds=60$' \
   "$project_dir/docker/run-compressor"
 grep -q '^readonly status_interval_seconds=60$' \
