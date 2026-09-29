@@ -75,6 +75,8 @@ state_dir="$HOME/.local/state/hutter-prize-cloud/$session"
 mkdir -p -- "$state_dir"
 run_script="$state_dir/run.sh"
 status_file="$state_dir/exit-status"
+temporary_run_script="$(mktemp "$state_dir/.run.XXXXXX")"
+trap 'rm -f -- "$temporary_run_script"' EXIT
 {
   printf '%s\n' '#!/usr/bin/env bash' 'set -uo pipefail'
   printf 'cd -- %q\n' "$workdir"
@@ -89,8 +91,13 @@ status_file="$state_dir/exit-status"
     'printf "Log: %s\n" '"$(printf '%q' "$log_file")" \
     'printf "This tmux session remains open for inspection. Exit the shell to close it.\n"' \
     'exec bash -i'
-} > "$run_script"
-chmod 0500 -- "$run_script"
+} > "$temporary_run_script"
+chmod 0500 -- "$temporary_run_script"
+# A previous launcher intentionally leaves run.sh mode 0500. Replace that
+# inode atomically instead of reopening it for writing when a retained host is
+# used for a later run.
+mv -f -- "$temporary_run_script" "$run_script"
+trap - EXIT
 rm -f -- "$status_file"
 
 tmux source-file "$tmux_fragment" 2>/dev/null || true

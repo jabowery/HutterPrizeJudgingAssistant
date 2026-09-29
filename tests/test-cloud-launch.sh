@@ -262,5 +262,12 @@ bash -n "$generated_runner" || fail "generated tmux command script is invalid"
 grep -q 'tee ' "$generated_runner" || fail "tmux command does not retain a log"
 grep -Fq "printf '%s\\n' Judging" "$generated_runner" \
   || fail "generated tmux start notice does not contain a line feed"
+# A retained cloud host has a prior run.sh that is deliberately mode 0500.
+# Creating the next run must replace that inode rather than fail reopening it.
+PATH="$fake_bin:$PATH" HOME="$tmux_home" \
+  "$project_dir/scripts/run-in-tmux.sh" \
+    --session cloud-test --history-limit 100000 --workdir "$tmux_work" \
+    -- printf '%s\n' retry > "$test_root/tmux-retry.stdout" \
+  || fail "tmux runner could not replace a prior mode-0500 run script"
 
 echo "cloud launch tests passed"
