@@ -80,6 +80,11 @@ target="$work_dir/fio-data"
 fio --name=prepare --filename="$target" --size="$size" --rw=write --bs=1M \
   --ioengine=psync --direct=1 --end_fsync=1 --output="$report_dir/prepare.json" \
   --output-format=json >/dev/null
+# Container UID 0 may be mapped to an unprivileged host UID. It needs only
+# traversal to the known test file and read/write access to that file; fio JSON
+# is returned over Docker stdout rather than created inside the bind mount.
+chmod 0701 -- "$work_dir"
+chmod 0666 -- "$target"
 
 run_host() {
   local profile="$1" output="$2"
@@ -95,9 +100,8 @@ run_container() {
     --mount "type=bind,source=$work_dir,target=/work" "$image" \
     fio --name="$profile" --filename=/work/fio-data --size="$size" --rw="$3" --bs=4k \
       --ioengine="$4" --iodepth=1 --direct="$5" --time_based --runtime="$duration" \
-      --randrepeat=1 --norandommap=1 --group_reporting --output=/work/"$(basename -- "$output")" \
-      --output-format=json >/dev/null
-  mv -- "$work_dir/$(basename -- "$output")" "$output"
+      --randrepeat=1 --norandommap=1 --group_reporting \
+      --output-format=json > "$output"
 }
 evict_file_cache() {
   local label="$1"

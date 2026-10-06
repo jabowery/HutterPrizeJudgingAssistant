@@ -120,6 +120,12 @@ grep -q -- '--env "CGROUP_LIMIT_BYTES=$HP_EXECUTION_RAM_BYTES"' \
 grep -q -- '--env "CGROUP_LIMIT_BYTES=$HP_EXECUTION_RAM_BYTES"' \
   "$project_dir/qualify-archive.sh"
 
+# The storage comparison must also work when container UID 0 is remapped. Its
+# evidence is returned over trusted Docker stdout rather than written from the
+# container into a host-root-owned bind directory.
+grep -q 'chmod 0666 -- "\$target"' "$project_dir/storage-preflight.sh"
+! grep -q -- '--output=/work/' "$project_dir/storage-preflight.sh"
+
 handoff_dir="$(mktemp -d)"
 handoff_gate="$handoff_dir/start.gate"
 handoff_ready="$handoff_dir/worker.ready"
