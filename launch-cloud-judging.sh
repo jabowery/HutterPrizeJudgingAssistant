@@ -206,6 +206,7 @@ fi
 [[ "$tmux_session" =~ ^[A-Za-z0-9_.-]+$ ]] || usage_error "invalid tmux session"
 [[ "$tmux_history_lines" =~ ^[1-9][0-9]*$ ]] \
   || usage_error "tmux-history-lines must be positive"
+tmux_socket_name="hutter-prize-$tmux_session"
 [[ -z "$geekbench_score" || "$geekbench_score" =~ ^[1-9][0-9]*$ ]] \
   || usage_error "invalid Geekbench score"
 [[ -n "$repo_url" && "$repo_url" != *$'\n'* \
@@ -572,6 +573,7 @@ remote_log="$remote_repo/Results/cloud-$stamp-$entry_name.log"
 tmux_command=(
   bash "$remote_tmux_runner"
   --session "$tmux_session"
+  --socket-name "$tmux_socket_name"
   --history-limit "$tmux_history_lines"
   --workdir "$remote_repo"
   --log "$remote_log"
@@ -580,7 +582,7 @@ tmux_command=(
 echo "Starting the judging workflow in tmux ($tmux_session)..." >&2
 if ssh_remote_once "$(shell_join "${tmux_command[@]}")"; then
   :
-elif ssh_remote "$(shell_join tmux has-session -t "$tmux_session")" \
+elif ssh_remote "$(shell_join tmux -L "$tmux_socket_name" has-session -t "$tmux_session")" \
     'Confirming the tmux session after transport loss' >/dev/null 2>&1; then
   echo "The tmux session exists; treating the disconnected start request as successful." >&2
 else
@@ -610,6 +612,7 @@ launch_record="$script_dir/Results/cloud-launch-$stamp-$entry_name.env"
   echo "enwik9_fetch_helper_sha256=$enwik9_fetch_helper_sha256"
   echo "source_only=$source_only"
   echo "tmux_session=$tmux_session"
+  echo "tmux_socket=$tmux_socket_name"
   echo "tmux_history_lines=$tmux_history_lines"
   echo "remote_log=$remote_log"
 } > "$launch_record"
@@ -620,7 +623,8 @@ printf 'Instance: %s (%s, project %s)\n' "$instance_name" "$selected_zone" "$pro
 printf 'Mode: %s\n' "$([[ "$source_only" == true ]] && echo source-only || echo full-submission)"
 printf 'Local launch record: %s\n' "$launch_record"
 printf 'Attach: gcloud compute ssh %q --zone=%q --project=%q -- -t %q\n' \
-  "$instance_name" "$selected_zone" "$project" "tmux attach-session -t $tmux_session"
+  "$instance_name" "$selected_zone" "$project" \
+  "tmux -L $tmux_socket_name attach-session -t $tmux_session"
 printf 'Watch: ./scripts/watch-cloud-judging.sh --instance %q --zone %q --project %q --remote-log %q\n' \
   "$instance_name" "$selected_zone" "$project" "$remote_log"
 printf 'Copy results: gcloud compute scp --recurse --zone=%q --project=%q %q %q\n' \

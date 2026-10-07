@@ -132,8 +132,10 @@ handled:
    then accepts the extracted file only after its canonical size, MD5, and
    SHA-256 have been verified. Transient SSH operations are retried
    automatically.
-5. Configures tmux for 100000 lines of scrollback and starts the run in a
-   detached session whose output is also written to a log.
+5. Starts a dedicated tmux server with 100000 lines of scrollback and runs the
+   workflow in a detached session whose output is also written to a log. The
+   dedicated server neither reads nor changes the operator's `~/.tmux.conf`
+   and does not alter any existing tmux server or session.
 
 While a compression or decompression invocation is running, the trusted
 runtime supervisor writes one status line per minute to the tmux session and

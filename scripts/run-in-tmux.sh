@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 session=hutter-judging
+socket_name=""
 history_limit=100000
 workdir="$PWD"
 log_file=""
@@ -10,12 +11,14 @@ usage() {
   cat <<'EOF'
 Usage: ./scripts/run-in-tmux.sh [OPTIONS] -- COMMAND [ARGUMENT ...]
 
-Configure persistent tmux scrollback, create a detached session, and run the
-given command while retaining a log and exit-status file. The session remains
-open at an interactive shell after the command completes.
+Create an isolated tmux server with persistent scrollback, create a detached
+session, and run the given command while retaining a log and exit-status file.
+The session remains open at an interactive shell after the command completes.
+The operator's tmux configuration and existing tmux server are not used.
 
 Options:
   --session NAME             Default: hutter-judging
+  --socket-name NAME         Default: hutter-prize-SESSION
   --history-limit LINES      Default: 100000
   --workdir DIR              Default: current directory
   --log FILE                 Default: WORKDIR/Results/cloud-NAME.log
@@ -39,6 +42,7 @@ declare -a command=()
 while (( $# > 0 )); do
   case "$1" in
     --session) (( $# >= 2 )) || usage_error "$1 requires a value"; session="$2"; shift 2 ;;
+    --socket-name) (( $# >= 2 )) || usage_error "$1 requires a value"; socket_name="$2"; shift 2 ;;
     --history-limit) (( $# >= 2 )) || usage_error "$1 requires a value"; history_limit="$2"; shift 2 ;;
     --workdir) (( $# >= 2 )) || usage_error "$1 requires a value"; workdir="$2"; shift 2 ;;
     --log) (( $# >= 2 )) || usage_error "$1 requires a value"; log_file="$2"; shift 2 ;;
@@ -50,6 +54,8 @@ done
 
 command -v tmux >/dev/null 2>&1 || die "tmux is not installed or is not in PATH"
 [[ "$session" =~ ^[A-Za-z0-9_.-]+$ ]] || die "invalid session name"
+socket_name="${socket_name:-hutter-prize-$session}"
+[[ "$socket_name" =~ ^[A-Za-z0-9_.-]+$ ]] || die "invalid socket name"
 [[ "$history_limit" =~ ^[1-9][0-9]*$ ]] || die "history-limit must be positive"
 (( ${#command[@]} > 0 )) || usage_error "COMMAND is required after --"
 [[ -d "$workdir" && ! -L "$workdir" ]] || die "invalid workdir: $workdir"
@@ -61,14 +67,7 @@ fi
 log_file="$(realpath -m -- "$log_file")"
 mkdir -p -- "$(dirname -- "$log_file")"
 
-tmux_fragment="$HOME/.tmux.hutter-prize.conf"
-printf 'set-option -g history-limit %s\n' "$history_limit" > "$tmux_fragment"
-touch "$HOME/.tmux.conf"
-source_line="source-file \"$tmux_fragment\""
-grep -Fqx -- "$source_line" "$HOME/.tmux.conf" \
-  || printf '%s\n' "$source_line" >> "$HOME/.tmux.conf"
-
-tmux has-session -t "$session" 2>/dev/null \
+tmux -L "$socket_name" has-session -t "$session" 2>/dev/null \
   && die "tmux session already exists: $session"
 
 state_dir="$HOME/.local/state/hutter-prize-cloud/$session"
@@ -100,13 +99,21 @@ mv -f -- "$temporary_run_script" "$run_script"
 trap - EXIT
 rm -f -- "$status_file"
 
-tmux source-file "$tmux_fragment" 2>/dev/null || true
+temporary_tmux_config="$(mktemp "$state_dir/.tmux.XXXXXX")"
+trap 'rm -f -- "$temporary_tmux_config"' EXIT
+printf 'set-option -g history-limit %s\n' "$history_limit" \
+  > "$temporary_tmux_config"
+chmod 0400 -- "$temporary_tmux_config"
 printf -v runner_command '%q' "$run_script"
-tmux new-session -d -s "$session" -c "$workdir" "$runner_command"
-[[ "$(tmux show-options -gv history-limit)" == "$history_limit" ]] \
+tmux -L "$socket_name" -f "$temporary_tmux_config" \
+  new-session -d -s "$session" -c "$workdir" "$runner_command"
+rm -f -- "$temporary_tmux_config"
+trap - EXIT
+[[ "$(tmux -L "$socket_name" show-options -gv history-limit)" == "$history_limit" ]] \
   || die "tmux did not apply history-limit $history_limit"
 
 printf 'tmux_session=%s\n' "$session"
+printf 'tmux_socket=%s\n' "$socket_name"
 printf 'history_limit=%s\n' "$history_limit"
 printf 'log_file=%s\n' "$log_file"
 printf 'status_file=%s\n' "$status_file"

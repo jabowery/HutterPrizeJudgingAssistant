@@ -242,10 +242,24 @@ grep -q 'unzip util-linux' "$project_dir/cloud/bootstrap-ubuntu.sh" \
 cat > "$fake_bin/tmux" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$TMUX_TEST_LOG"
-case "${1:-}" in
+subcommand=""
+config=""
+while (( $# > 0 )); do
+  case "$1" in
+    -L) shift 2 ;;
+    -f) config="$2"; shift 2 ;;
+    has-session|new-session|show-options) subcommand="$1"; break ;;
+    *) shift ;;
+  esac
+done
+case "$subcommand" in
   has-session) exit 1 ;;
   show-options) printf '%s\n' "$TMUX_EXPECTED_HISTORY" ;;
-  source-file|new-session) exit 0 ;;
+  new-session)
+    grep -qx "set-option -g history-limit $TMUX_EXPECTED_HISTORY" "$config" \
+      || exit 91
+    exit 0
+    ;;
   *) exit 90 ;;
 esac
 EOF
@@ -253,17 +267,25 @@ chmod 0500 -- "$fake_bin/tmux"
 tmux_home="$test_root/home"
 tmux_work="$test_root/work"
 mkdir -p -- "$tmux_home" "$tmux_work"
+printf '%s\n' 'set-option -g history-limit 250000' \
+  'set-option -g mouse on' > "$tmux_home/.tmux.conf"
+cp -- "$tmux_home/.tmux.conf" "$test_root/operator-tmux.conf"
 export TMUX_TEST_LOG="$test_root/tmux.log"
 export TMUX_EXPECTED_HISTORY=100000
 PATH="$fake_bin:$PATH" HOME="$tmux_home" \
   "$project_dir/scripts/run-in-tmux.sh" \
     --session cloud-test --history-limit 100000 --workdir "$tmux_work" \
     -- printf '%s\n' hello > "$test_root/tmux.stdout"
-grep -q '^set-option -g history-limit 100000$' \
-  "$tmux_home/.tmux.hutter-prize.conf" \
-  || fail "tmux history was not configured"
-grep -q '^new-session -d -s cloud-test ' "$TMUX_TEST_LOG" \
+cmp -s -- "$test_root/operator-tmux.conf" "$tmux_home/.tmux.conf" \
+  || fail "tmux runner modified the operator's tmux configuration"
+[[ ! -e "$tmux_home/.tmux.hutter-prize.conf" ]] \
+  || fail "tmux runner left a configuration fragment in the operator's home"
+grep -q '^-L hutter-prize-cloud-test -f .* new-session -d -s cloud-test ' \
+  "$TMUX_TEST_LOG" \
   || fail "detached tmux session was not requested"
+grep -q '^-L hutter-prize-cloud-test show-options -gv history-limit$' \
+  "$TMUX_TEST_LOG" \
+  || fail "dedicated tmux server history was not verified"
 generated_runner="$tmux_home/.local/state/hutter-prize-cloud/cloud-test/run.sh"
 bash -n "$generated_runner" || fail "generated tmux command script is invalid"
 grep -q 'tee ' "$generated_runner" || fail "tmux command does not retain a log"
@@ -271,11 +293,14 @@ grep -Fq "printf '%s\\n' Judging" "$generated_runner" \
   || fail "generated tmux start notice does not contain a line feed"
 # A retained cloud host has a prior run.sh that is deliberately mode 0500.
 # Creating the next run must replace that inode rather than fail reopening it.
+rm -f -- "$tmux_home/.tmux.conf"
 PATH="$fake_bin:$PATH" HOME="$tmux_home" \
   "$project_dir/scripts/run-in-tmux.sh" \
     --session cloud-test --history-limit 100000 --workdir "$tmux_work" \
   -- printf '%s\n' retry > "$test_root/tmux-retry.stdout" \
   || fail "tmux runner could not replace a prior mode-0500 run script"
+[[ ! -e "$tmux_home/.tmux.conf" ]] \
+  || fail "tmux runner created an operator configuration when none existed"
 
 chmod 0700 -- "$fake_bin/gcloud"
 cat > "$fake_bin/gcloud" <<'EOF'
