@@ -13,7 +13,7 @@ readonly canonical_enwik9_sha256=159b85351e5f76e60cbe32e04c677847a9ecba3adc79add
 instance_name=hutter-judging-node
 project=""
 machine_type=t2d-standard-8
-region=us-central1
+region=""
 boot_disk_size=200GB
 boot_disk_type=pd-ssd
 image_family=ubuntu-2404-lts-amd64
@@ -60,7 +60,7 @@ Cloud options:
   --instance-name NAME       Default: hutter-judging-node
   --project PROJECT          Default: active gcloud project
   --machine-type TYPE        Default: t2d-standard-8
-  --region REGION            Default: us-central1
+  --region REGION            Restrict discovery to this region (default: all regions)
   --zone ZONE                Candidate zone; repeat to set an explicit order
   --boot-disk-size SIZE      Default: 200GB
   --boot-disk-type TYPE      Default: pd-ssd
@@ -133,7 +133,7 @@ while (( $# > 0 )); do
     --instance-name) (( $# >= 2 )) || usage_error "$1 requires a value"; instance_name="$2"; shift 2 ;;
     --project) (( $# >= 2 )) || usage_error "$1 requires a value"; project="$2"; shift 2 ;;
     --machine-type) (( $# >= 2 )) || usage_error "$1 requires a value"; machine_type="$2"; shift 2 ;;
-    --region) (( $# >= 2 )) || usage_error "$1 requires a value"; region="$2"; shift 2 ;;
+    --region) (( $# >= 2 )) || usage_error "$1 requires a value"; [[ -n "$2" ]] || usage_error "$1 requires a nonempty value"; region="$2"; shift 2 ;;
     --zone) (( $# >= 2 )) || usage_error "$1 requires a value"; requested_zones+=("$2"); shift 2 ;;
     --boot-disk-size) (( $# >= 2 )) || usage_error "$1 requires a value"; boot_disk_size="$2"; shift 2 ;;
     --boot-disk-type) (( $# >= 2 )) || usage_error "$1 requires a value"; boot_disk_type="$2"; shift 2 ;;
@@ -186,9 +186,11 @@ entry_name="$(basename -- "$entry_dir")"
   || die "entry directory basename is not portable: $entry_name"
 [[ "$instance_name" =~ ^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$ ]] \
   || usage_error "instance-name must be a valid Compute Engine instance name"
-[[ -n "$machine_type" && -n "$region" && -n "$boot_disk_type" \
+[[ -n "$machine_type" && -n "$boot_disk_type" \
     && -n "$image_family" && -n "$image_project" ]] \
-  || usage_error "machine, region, disk, and image values must not be empty"
+  || usage_error "machine, disk, and image values must not be empty"
+[[ -z "$region" || "$region" =~ ^[a-z0-9-]+$ ]] \
+  || usage_error "invalid region: $region"
 [[ "$boot_disk_size" =~ ^[1-9][0-9]*(GB|TB)$ ]] \
   || usage_error "boot-disk-size must be a whole number of GB or TB"
 for zone in "${requested_zones[@]}"; do
@@ -249,7 +251,7 @@ judging_command+=("../HutterPrizeSubmissions/$entry_name" ./enwik9)
 if [[ "$dry_run" == true ]]; then
   printf 'instance_name=%s\n' "$instance_name"
   printf 'machine_type=%s\n' "$machine_type"
-  printf 'region=%s\n' "$region"
+  printf 'region=%s\n' "${region:-all}"
   printf 'boot_disk_size=%s\n' "$boot_disk_size"
   printf 'threads_per_core=%s\n' "${threads_per_core:-default}"
   printf 'local_ssd_nvme=%s\n' "$local_ssd_nvme"
@@ -336,13 +338,13 @@ else
     --name "$instance_name"
     --project "$project"
     --machine-type "$machine_type"
-    --region "$region"
     --boot-disk-size "$boot_disk_size"
     --boot-disk-type "$boot_disk_type"
     --image-family "$image_family"
     --image-project "$image_project"
     --labels "$labels"
   )
+  [[ -z "$region" ]] || provision_args+=(--region "$region")
   [[ -z "$threads_per_core" ]] || provision_args+=(--threads-per-core "$threads_per_core")
   [[ "$local_ssd_nvme" != true ]] || provision_args+=(--local-ssd-nvme)
   for zone in "${requested_zones[@]}"; do provision_args+=(--zone "$zone"); done

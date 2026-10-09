@@ -6,7 +6,7 @@ readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 instance_name=hutter-judging-node
 project=""
 machine_type=t2d-standard-8
-region=us-central1
+region=""
 boot_disk_size=200GB
 boot_disk_type=pd-ssd
 image_family=ubuntu-2404-lts-amd64
@@ -31,7 +31,7 @@ Options:
   --name NAME                 Default: hutter-judging-node
   --project PROJECT           Default: active gcloud project
   --machine-type TYPE         Default: t2d-standard-8 (32 GiB)
-  --region REGION             Discover candidate zones here (default: us-central1)
+  --region REGION             Restrict discovery to this region (default: all regions)
   --zone ZONE                 Candidate zone; repeat to set an explicit order
   --boot-disk-size SIZE       Default: 200GB
   --boot-disk-type TYPE       Default: pd-ssd
@@ -69,7 +69,7 @@ while (( $# > 0 )); do
     --name) (( $# >= 2 )) || usage_error "$1 requires a value"; instance_name="$2"; shift 2 ;;
     --project) (( $# >= 2 )) || usage_error "$1 requires a value"; project="$2"; shift 2 ;;
     --machine-type) (( $# >= 2 )) || usage_error "$1 requires a value"; machine_type="$2"; shift 2 ;;
-    --region) (( $# >= 2 )) || usage_error "$1 requires a value"; region="$2"; shift 2 ;;
+    --region) (( $# >= 2 )) || usage_error "$1 requires a value"; [[ -n "$2" ]] || usage_error "$1 requires a nonempty value"; region="$2"; shift 2 ;;
     --zone) (( $# >= 2 )) || usage_error "$1 requires a value"; requested_zones+=("$2"); shift 2 ;;
     --boot-disk-size) (( $# >= 2 )) || usage_error "$1 requires a value"; boot_disk_size="$2"; shift 2 ;;
     --boot-disk-type) (( $# >= 2 )) || usage_error "$1 requires a value"; boot_disk_type="$2"; shift 2 ;;
@@ -89,9 +89,11 @@ done
 command -v gcloud >/dev/null 2>&1 || die "gcloud is not installed or is not in PATH"
 [[ "$instance_name" =~ ^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$ ]] \
   || usage_error "name must be a valid Compute Engine instance name"
-[[ -n "$machine_type" && -n "$region" && -n "$boot_disk_type" \
+[[ -n "$machine_type" && -n "$boot_disk_type" \
     && -n "$image_family" && -n "$image_project" ]] \
-  || usage_error "machine, region, disk, and image values must not be empty"
+  || usage_error "machine, disk, and image values must not be empty"
+[[ -z "$region" || "$region" =~ ^[a-z0-9-]+$ ]] \
+  || usage_error "invalid region: $region"
 [[ "$boot_disk_size" =~ ^[1-9][0-9]*(GB|TB)$ ]] \
   || usage_error "boot-disk-size must be a whole number of GB or TB"
 [[ -z "$threads_per_core" || "$threads_per_core" =~ ^[1-9][0-9]*$ ]] \
@@ -117,17 +119,23 @@ declare -a candidate_zones=()
 if (( ${#requested_zones[@]} > 0 )); then
   candidate_zones=("${requested_zones[@]}")
 else
+  discovery_filter="name=$machine_type"
+  [[ -z "$region" ]] || discovery_filter+=" AND zone~^$region-"
   zone_output="$(gcloud compute machine-types list "${project_args[@]}" \
-    --filter="name=$machine_type AND zone~$region" \
+    --filter="$discovery_filter" --sort-by=zone \
     --format='value(zone)')" \
     || die "could not discover zones containing machine type $machine_type"
   while IFS= read -r zone; do
     zone="${zone##*/}"
-    [[ "$zone" == "$region-"* ]] && candidate_zones+=("$zone")
+    [[ -n "$zone" ]] || continue
+    if [[ -z "$region" || "$zone" == "$region-"* ]]; then
+      candidate_zones+=("$zone")
+    fi
   done <<< "$zone_output"
 fi
 (( ${#candidate_zones[@]} > 0 )) \
-  || die "no candidate zones found for $machine_type in $region"
+  || die "no candidate zones found for $machine_type in ${region:-all regions}"
+printf 'Candidate zones for %s: %s\n' "$machine_type" "${candidate_zones[*]}" >&2
 
 declare -A attempted_zones=()
 for zone in "${candidate_zones[@]}"; do

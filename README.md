@@ -120,7 +120,11 @@ credentials already selected in the invoking environment:
 The launcher performs the following trusted operations before entrant code is
 handled:
 
-1. Tries zones in `us-central1` until a `t2d-standard-8` can be allocated.
+1. Lists all zones offering the requested machine type, prints the candidate
+   list, and tries them until an instance can be allocated. The default machine
+   type is `t2d-standard-8`. Use `--region` to restrict discovery or repeated
+   `--zone` arguments to supply an ordered list of candidates. Each attempt
+   retains the requested machine type and Local SSD selection.
 2. Creates a Shielded Ubuntu 24.04 instance with a 200 GB SSD, enough RAM for
    two 16 GiB execution environments, no attached service account, and no
    OAuth scopes.

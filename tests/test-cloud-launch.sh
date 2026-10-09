@@ -30,16 +30,15 @@ case "$*" in
   *"compute machine-types list"*)
     printf '%s\n' \
       'https://www.googleapis.com/compute/v1/projects/example/zones/us-central1-a' \
-      'https://www.googleapis.com/compute/v1/projects/example/zones/us-central1-b'
+      'https://www.googleapis.com/compute/v1/projects/example/zones/us-central1-b' \
+      'https://www.googleapis.com/compute/v1/projects/example/zones/us-east1-b'
     ;;
   *"compute machine-types describe"*)
     printf '%s\n' 16384
     ;;
-  *"compute instances create"*"--zone=us-central1-a"*)
-    exit 1
-    ;;
-  *"compute instances create"*"--zone=us-central1-b"*)
-    exit 0
+  *"compute instances create"*)
+    [[ " $* " == *" --zone=${GCLOUD_AVAILABLE_ZONE:-us-east1-b} "* ]]
+    exit $?
     ;;
   *"compute instances describe"*)
     exit 0
@@ -79,12 +78,18 @@ selected_zone="$(
     --tags wg-node \
     2>"$test_root/provision.stderr"
 )" || fail "provisioner rejected the fake capacity fallback"
-[[ "$selected_zone" == us-central1-b ]] \
-  || fail "provisioner did not return the successful zone"
+[[ "$selected_zone" == us-east1-b ]] \
+  || fail "provisioner did not continue to the successful zone in another region"
 grep -q 'instances create test-hutter-system.*--zone=us-central1-a' \
   "$GCLOUD_TEST_LOG" || fail "first candidate zone was not attempted"
 grep -q 'instances create test-hutter-system.*--zone=us-central1-b' \
   "$GCLOUD_TEST_LOG" || fail "second candidate zone was not attempted"
+grep -q 'instances create test-hutter-system.*--zone=us-east1-b' \
+  "$GCLOUD_TEST_LOG" || fail "candidate zone in another region was not attempted"
+grep -q 'machine-types list .*--filter=name=t2d-standard-4 --sort-by=zone' \
+  "$GCLOUD_TEST_LOG" || fail "default discovery was not unrestricted across regions"
+grep -q 'Candidate zones.*us-central1-a us-central1-b us-east1-b' \
+  "$test_root/provision.stderr" || fail "complete candidate list was not reported"
 grep -q -- '--boot-disk-size=240GB' "$GCLOUD_TEST_LOG" \
   || fail "disk-size override was not forwarded"
 grep -q -- '--tags=wg-node' "$GCLOUD_TEST_LOG" \
@@ -107,6 +112,35 @@ grep -q -- '--shielded-vtpm' "$GCLOUD_TEST_LOG" \
   || fail "Shielded VM vTPM was not requested"
 grep -q -- '--shielded-integrity-monitoring' "$GCLOUD_TEST_LOG" \
   || fail "Shielded VM integrity monitoring was not requested"
+
+region_log="$test_root/region-gcloud.log"
+selected_zone="$(
+  PATH="$fake_bin:$PATH" GCLOUD_TEST_LOG="$region_log" \
+    GCLOUD_AVAILABLE_ZONE=us-central1-b \
+    "$project_dir/provision-gcp-instance.sh" \
+    --project example-project --name regional-test \
+    --region us-central1 2>"$test_root/region.stderr"
+)" || fail "explicit regional discovery failed"
+[[ "$selected_zone" == us-central1-b ]] \
+  || fail "regional discovery did not return the successful zone"
+grep -q 'machine-types list .*zone~\^us-central1-' "$region_log" \
+  || fail "regional discovery did not apply the requested filter"
+if grep -q 'instances create.*--zone=us-east1-b' "$region_log"; then
+  fail "regional discovery attempted a zone outside the requested region"
+fi
+
+zones_log="$test_root/zones-gcloud.log"
+selected_zone="$(
+  PATH="$fake_bin:$PATH" GCLOUD_TEST_LOG="$zones_log" \
+    "$project_dir/provision-gcp-instance.sh" \
+    --project example-project --name explicit-zone-test \
+    --zone us-east1-b --zone us-central1-a 2>"$test_root/zones.stderr"
+)" || fail "explicit zone discovery failed"
+[[ "$selected_zone" == us-east1-b ]] \
+  || fail "explicit zone ordering was not preserved"
+if grep -q 'machine-types list\|instances create.*--zone=us-central1-a' "$zones_log"; then
+  fail "explicit zone selection discovered extra zones or continued after success"
+fi
 
 cat > "$fake_bin/sleep" <<'EOF'
 #!/usr/bin/env bash
@@ -167,6 +201,8 @@ source_plan="$test_root/source-plan"
   "$source_entry" > "$source_plan"
 grep -q '^machine_type=n4d-highmem-2$' "$source_plan" \
   || fail "launcher did not retain its machine override"
+grep -q '^region=all$' "$source_plan" \
+  || fail "launcher did not default to discovery across all regions"
 grep -q '^archive_present=no$' "$source_plan" \
   || fail "launcher did not detect an absent archive"
 grep -q '^execution_mode=source_only$' "$source_plan" \
