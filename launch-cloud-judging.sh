@@ -624,6 +624,7 @@ printf '\nCloud judging workflow started.\n'
 printf 'Instance: %s (%s, project %s)\n' "$instance_name" "$selected_zone" "$project"
 printf 'Mode: %s\n' "$([[ "$source_only" == true ]] && echo source-only || echo full-submission)"
 printf 'Local launch record: %s\n' "$launch_record"
+printf 'Status: ./judging-status.sh --launch-record %q\n' "$launch_record"
 printf 'Attach: gcloud compute ssh %q --zone=%q --project=%q -- -t %q\n' \
   "$instance_name" "$selected_zone" "$project" \
   "tmux -L $tmux_socket_name attach-session -t $tmux_session"

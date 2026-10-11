@@ -141,6 +141,26 @@ handled:
    dedicated server neither reads nor changes the operator's `~/.tmux.conf`
    and does not alter any existing tmux server or session.
 
+Obtain a compact overview without downloading logs or archives:
+
+```bash
+./judging-status.sh --instance hpja-c2d8 --zone africa-south1-a \
+  --project "$(gcloud config get-value project)"
+```
+
+The launcher also prints a `Status:` command using its local launch record.
+Add `--watch 60` for periodic updates. For local or downloaded results, use
+`./judging-status.sh Results/full-RUN-NAME`, or omit the path to select the
+latest run under `Results/`.
+
+The overview shows stage verdicts, last observed wall time and projections,
+operator-attention notices, and explicitly labelled submitted versus rebuilt
+artifacts. A copied results tree is a snapshot, not confirmation that a cloud
+process is still running. New runs record the orchestrator lifecycle in
+`judging-state.env`; live worker samples include their age. Older runs use
+completed stage evidence and last-recorded workflow-log telemetry. No status
+query changes the run, executes contestant code, or transfers archives.
+
 While a compression or decompression invocation is running, the trusted
 runtime supervisor writes one status line per minute to the tmux session and
 its log. It reports wall elapsed and remaining allowance for cost tracking,

@@ -10,6 +10,7 @@ source "$script_dir/lib/prize-limits.sh"
 source "$script_dir/lib/resource-units.sh"
 source "$script_dir/lib/cold-cache.sh"
 source "$script_dir/lib/host-dependencies.sh"
+source "$script_dir/lib/judging-state.sh"
 image=""
 entry_dir=""
 reference_path="$script_dir/enwik9"
@@ -283,9 +284,11 @@ cleanup_compression() {
   fi
 }
 cleanup_all() {
+  local hp_js_result=$?
   cleanup_compression
   cleanup_qualification
   cleanup_staged_entry
+  hp_judging_state_write "${hp_judging_current_stage:-setup}" exited "$hp_js_result"
   restore_invoking_user_ownership
 }
 restore_invoking_user_ownership() {
@@ -309,6 +312,7 @@ trap 'exit 130' INT TERM
 stage_fail() {
   local stage="$1"
   local reason="$2"
+  hp_judging_state_write "$stage"
   {
     echo "technical_verdict=FAIL"
     echo "failed_stage=$stage"
@@ -490,6 +494,8 @@ readonly entry_name="$(basename -- "$entry_dir")"
 run_results="$results_path/full-$stamp-$entry_name"
 readonly run_results
 mkdir -p -- "$run_results/generated"
+mkdir -p -- "$run_results/live-status"
+hp_judging_state_write common_image
 qualification_container_file="$run_results/qualification-container-id"
 
 echo "Building the common judging image..." >&2
@@ -502,6 +508,7 @@ hp_qualification_os_build "$qualification_os" "$image" "$script_dir" >&2 \
   || stage_fail common_image "Docker image build failed"
 
 echo "Measuring trusted storage preflight..." >&2
+hp_judging_state_write storage_preflight
 if ! "$script_dir/storage-preflight.sh" \
     --image "$image" --work-root "$work_root" \
     --results "$run_results"; then
@@ -535,6 +542,7 @@ if [[ "$cold_cache" == true ]]; then
 fi
 
 echo "Checking the Docker Linux security boundary..." >&2
+hp_judging_state_write host_security
 if ! "$script_dir/host-security-preflight.sh" \
     --image "$image" --report "$run_results/host-security.env" \
     2> >(tee "$run_results/host-security.log" >&2); then
@@ -544,6 +552,7 @@ fi
 active_stage_root="$(mktemp -d -- "$work_root/hutter-package-$stamp.XXXXXX")"
 prepared_entry="$active_stage_root/$entry_name"
 prepare_options=()
+hp_judging_state_write submission_package
 if [[ "$source_only" == true ]]; then
   prepare_options+=(--source-only)
 fi
@@ -567,6 +576,7 @@ command_line_bytes="$(stat --format='%s' "$entry_dir/$HP_COMPRESSOR_ARGUMENTS")"
 command_line_sha256="$(sha256sum "$entry_dir/$HP_COMPRESSOR_ARGUMENTS" | awk '{print $1}')"
 
 if [[ -z "$geekbench_score" ]]; then
+  hp_judging_state_write geekbench
   geekbench_score="$("$script_dir/benchmark.sh" \
     --skip-build --image "$image" \
     --qualification-os "$qualification_os" \
@@ -576,6 +586,7 @@ fi
 time_limit_seconds="$(awk -v score="$geekbench_score" \
   'BEGIN { print int((70000 * 3600) / score) }')"
 
+hp_judging_state_write dependencies
 if ! dependency_images="$(hp_dependency_image_build \
     "$script_dir" "$image" "$entry_dir" "$run_results/dependencies")"; then
   stage_fail dependencies "install.sh dependency image failed"
@@ -607,6 +618,7 @@ if [[ "$source_only" == true ]]; then
   execution_mode=serial
   echo "[$entry_name] source-only mode: submitted decompression qualification skipped" >&2
 else
+  hp_judging_state_write submitted_validation
   submitted_execution_dir="$run_results/execution/submitted"
   if [[ "$HP_ENTRY_FORMAT" == self-extracting ]]; then
     if ! "$script_dir/validate-executable.sh" \
@@ -627,6 +639,7 @@ else
   fi
 
   qualification_command=("$script_dir/qualify-archive.sh" --skip-build --skip-storage-preflight
+    --status-path-file "$run_results/live-status/submitted-decompression.path"
     --container-id-file "$qualification_container_file"
     --results "$run_results/submitted-decompression"
     --output "$decompressed_output" "${common_limits[@]}")
@@ -656,6 +669,7 @@ if [[ "$HP_ENTRY_FORMAT" == separate-decompressor ]]; then
   decompressor_path="$run_results/generated/$HP_DECOMPRESSOR"
   build_options+=(--decompressor-output "$decompressor_path")
 fi
+hp_judging_state_write compressor_build
 if ! "$script_dir/build-compressor.sh" \
     --skip-base-build --image "$image" \
     --dependency-build-image "$dependency_build_image" \
@@ -665,6 +679,7 @@ if ! "$script_dir/build-compressor.sh" \
 fi
 
 compressor_exec_path="$run_results/execution/rebuilt/$HP_COMPRESSOR"
+hp_judging_state_write compressor_validation
 if ! "$script_dir/validate-executable.sh" \
     --image "$image" --format "$HP_COMPRESSOR_FORMAT" \
     --results "$run_results/validation/rebuilt-compressor" \
@@ -694,6 +709,7 @@ if [[ "$source_only" != true ]]; then
   )
 fi
 compression_command=("$script_dir/compress-entry.sh" \
+    --status-path-file "$run_results/live-status/compression.path" \
     --image "$dependency_runtime_image" --work-root "$work_root" \
     --results "$run_results/compression" \
     --output "$generated_archive" \
@@ -716,6 +732,7 @@ compression_projection=not_observed
 
 if [[ "$source_only" == true || "$job_slots" == 1 ]]; then
   if [[ "$source_only" != true ]]; then
+    hp_judging_state_write submitted_decompression
     echo "[$entry_name] validating submitted decompression in serial mode" >&2
     if ! "${qualification_command[@]}"; then
       stage_fail submitted_decompression "submitted artifacts did not reproduce enwik9"
@@ -723,11 +740,13 @@ if [[ "$source_only" == true || "$job_slots" == 1 ]]; then
     submitted_qualification=pass
   fi
   echo "[$entry_name] starting rebuilt-compressor compression (serial mode)" >&2
+  hp_judging_state_write compression
   if ! "${compression_command[@]}"; then
     stage_fail compression "rebuilt compressor failed"
   fi
   compression_complete=true
 else
+  hp_judging_state_write adaptive_runtime
   adaptive_dir="$run_results/adaptive-control"
   mkdir -p -- "$adaptive_dir"
   chmod 0700 -- "$adaptive_dir"
@@ -1008,6 +1027,7 @@ else
 fi
 
 generated_sha256="$(sha256sum "$generated_archive" | awk '{print $1}')"
+hp_judging_state_write generated_validation
 submitted_archive=""
 submitted_archive_bytes=not_provided
 submitted_sha256=not_provided
@@ -1046,6 +1066,7 @@ else
     echo "[$entry_name] generated artifacts require a fresh decompression" >&2
   fi
   generated_qualification=("$script_dir/qualify-archive.sh" --skip-build --skip-storage-preflight
+    --status-path-file "$run_results/live-status/generated-decompression.path"
     --results "$run_results/generated-decompression"
     --output "$decompressed_output" "${common_limits[@]}")
   if [[ "$HP_ENTRY_FORMAT" == self-extracting ]]; then
@@ -1070,12 +1091,14 @@ else
     generated_qualification_dir="$run_results/execution/rebuilt"
   fi
   generated_qualification+=("$generated_qualification_dir" "$reference_path")
+  hp_judging_state_write generated_decompression
   if ! "${generated_qualification[@]}"; then
     stage_fail generated_decompression "differing generated archive did not reproduce enwik9"
   fi
   second_decompression=pass
 fi
 
+hp_judging_state_write scoring
 compressor_bytes="$(stat --format='%s' "$compressor_path")"
 generated_archive_bytes="$(stat --format='%s' "$generated_archive")"
 decompressor_bytes=0
