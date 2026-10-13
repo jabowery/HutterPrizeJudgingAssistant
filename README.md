@@ -161,6 +161,28 @@ process is still running. New runs record the orchestrator lifecycle in
 completed stage evidence and last-recorded workflow-log telemetry. No status
 query changes the run, executes contestant code, or transfers archives.
 
+The high-level report includes size accounting and record improvement,
+Geekbench score and time allowance, measured wall and CPU times, formal peak
+RSS and its limit, sampled peak allocated work storage, cgroup peak memory
+(including cache), and archive/output MD5 and SHA-256 checksums. New runs save
+the complete report in `final-report.txt` and record measured MD5s alongside
+SHA-256 in the verification evidence.
+
+To obtain just these numbers without downloading the result tree, add
+`--report-only` to a local or cloud status query. For example:
+
+```bash
+./judging-status.sh --instance hpja-c2d8 --zone africa-south1-a \
+  --project "$(gcloud config get-value project)" --report-only
+```
+
+This view selects verdicts and measurements, excluding raw logs, URLs, host
+paths and copied entrant scripts. It does not certify that the full `Results/`
+tree is suitable for publication. For completed older runs, report-only mode
+can compute missing archive MD5s from retained files. If a decompressed MD5
+was not measured, the report either identifies an inference from verified
+canonical `enwik9` or says it was not recorded; it never invents a measurement.
+
 While a compression or decompression invocation is running, the trusted
 runtime supervisor writes one status line per minute to the tmux session and
 its log. It reports wall elapsed and remaining allowance for cost tracking,

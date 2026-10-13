@@ -35,11 +35,15 @@ reference_bytes="$(stat --format='%s' -- "$reference")"
 output_bytes="$(stat --format='%s' -- "$output")"
 reference_sha256="$(sha256sum -- "$reference" | awk '{print $1}')"
 output_sha256="$(sha256sum -- "$output" | awk '{print $1}')"
+reference_md5="$(md5sum -- "$reference" | awk '{print $1}')"
+output_md5="$(md5sum -- "$output" | awk '{print $1}')"
 
 printf 'reference_bytes=%s\n' "$reference_bytes"
 printf 'output_bytes=%s\n' "$output_bytes"
 printf 'reference_sha256=%s\n' "$reference_sha256"
 printf 'output_sha256=%s\n' "$output_sha256"
+printf 'reference_md5=%s\n' "$reference_md5"
+printf 'output_md5=%s\n' "$output_md5"
 
 if [[ "$reference_bytes" != "$output_bytes" ]]; then
   result fail size_mismatch 1

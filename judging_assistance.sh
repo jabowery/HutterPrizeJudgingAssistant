@@ -318,8 +318,10 @@ stage_fail() {
     echo "failed_stage=$stage"
     echo "reason=$reason"
   } > "$run_results/final.env"
-  printf 'FAIL at %s: %s\nResults: %s\n' "$stage" "$reason" "$run_results" \
-    | tee "$run_results/final-report.txt" >&2
+  {
+    printf 'FAIL at %s: %s\nResults: %s\n' "$stage" "$reason" "$run_results"
+    "$script_dir/judging-status.sh" --report-only "$run_results"
+  } | tee "$run_results/final-report.txt" >&2
   exit 1
 }
 
@@ -1031,12 +1033,14 @@ hp_judging_state_write generated_validation
 submitted_archive=""
 submitted_archive_bytes=not_provided
 submitted_sha256=not_provided
+submitted_md5=not_provided
 archives_identical=not_evaluated
 rebuilt_decompressor_identical=not_evaluated
 if [[ "$source_only" != true ]]; then
   submitted_archive="$submission_entry_dir/$HP_ARCHIVE"
   submitted_archive_bytes="$(stat --format='%s' "$submitted_archive")"
   submitted_sha256="$(sha256sum "$submitted_archive" | awk '{print $1}')"
+  submitted_md5="$(md5sum -- "$submitted_archive" | awk '{print $1}')"
   rebuilt_decompressor_identical=not_applicable
 fi
 if [[ "$source_only" != true \
@@ -1165,8 +1169,10 @@ fi
   echo "rebuilt_decompressor_identical=$rebuilt_decompressor_identical"
   echo "submitted_archive_bytes=$submitted_archive_bytes"
   echo "submitted_archive_sha256=$submitted_sha256"
+  echo "submitted_archive_md5=$submitted_md5"
   echo "generated_archive_bytes=$generated_archive_bytes"
   echo "generated_archive_sha256=$generated_sha256"
+  echo "generated_archive_md5=$(md5sum -- "$generated_archive" | awk '{print $1}')"
   echo "compressor_bytes=$compressor_bytes"
   echo "decompressor_bytes=$decompressor_bytes"
   echo "decompressor_multiplier=$decompressor_multiplier"
@@ -1212,4 +1218,6 @@ fi
   echo "Runtime executable policy: $runtime_exec_policy"
   echo "Cold cache: $cold_cache"
   echo "Results: $run_results"
+  echo
+  "$script_dir/judging-status.sh" --report-only "$run_results"
 } | tee "$run_results/final-report.txt"

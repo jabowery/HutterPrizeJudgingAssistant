@@ -88,4 +88,72 @@ printf 'source_only=true\n' > "$run_results/judging-state.env.new"
 mv "$run_results/judging-state.env.new" "$run_results/judging-state.env"
 output="$(bash "$project_dir/judging-status.sh" "$run_results")"
 [[ "$output" == *'SKIPPED (source-only)'* ]] || fail 'source-only skip missing'
+# A compact report must carry the actual decision numbers, without logs or
+# arbitrary environment fields that may contain credentials or private paths.
+mkdir -p "$run_results/submitted-decompression/20261010/submitted"
+cat > "$run_results/final.env" <<'EOF'
+technical_verdict=PASS
+entry=Fixture
+geekbench5_score=1288
+time_limit_seconds=195652
+memory_limit_bytes=10737418240
+execution_environment_memory_bytes=17179869184
+disk_limit_bytes=100000000000
+submitted_archive_bytes=91913343
+generated_archive_bytes=91913343
+compressor_bytes=4000689
+command_line_bytes=19
+formal_total_bytes=95914051
+previous_record_bytes=110793128
+one_percent_threshold_bytes=109685196
+improvement_percent=13.429604
+record_status=MEETS_ONE_PERCENT
+second_decompression=skipped_identical
+submitted_archive_sha256=30eaf239168bd4efb4c57af09002b968308d7614d0cca619540e971fc38f4f18
+generated_archive_sha256=30eaf239168bd4efb4c57af09002b968308d7614d0cca619540e971fc38f4f18
+secret=DO_NOT_PUBLISH_SECRET
+reason=https://example.invalid/claim?key=DO_NOT_PUBLISH_SECRET
+EOF
+cat > "$run_results/submitted-decompression/20261010/submitted/verification.env" <<'EOF'
+output_bytes=1000000000
+output_sha256=159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc
+reference_sha256=159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc
+verification=pass
+reason=identical
+EOF
+# Put the completed timing and metrics together in the worker report, as in
+# real results; keep the older root-level timing to exercise compatibility.
+printf '176369\n' > "$run_results/submitted-decompression/20261010/submitted/gnu_time_elapsed_seconds"
+printf '10649600000\n' > "$run_results/submitted-decompression/20261010/submitted/peak_rss_bytes"
+printf '9000000000\n' > "$run_results/submitted-decompression/20261010/submitted/gnu_time_peak_rss_bytes"
+printf '10649600000\n' > "$run_results/submitted-decompression/20261010/submitted/process_tree_peak_rss_bytes"
+printf '14000000000\n' > "$run_results/submitted-decompression/20261010/submitted/cgroup_peak_memory_bytes"
+printf '12000000000\n' > "$run_results/submitted-decompression/20261010/submitted/peak_disk_bytes"
+cat > "$run_results/submitted-decompression/20261010/submitted/time.txt" <<'EOF'
+ User time (seconds): 173531.51
+ System time (seconds): 1699.94
+EOF
+printf 'archive_file=archive9\n' > "$run_results/submission-package.env"
+mkdir -p "$run_results/submission-package"
+mv "$run_results/submission-package.env" "$run_results/submission-package/package.env"
+report="$(bash "$project_dir/judging-status.sh" --report-only "$run_results")"
+[[ "$report" == *'Formal size S: 95914051 bytes'* ]] || fail 'formal size absent'
+[[ "$report" == *'Compressor command-line options: 19 bytes'* ]] || fail 'argument charge absent'
+[[ "$report" == *'Geekbench 5 single-core score: 1288'* ]] || fail 'handicap score absent'
+[[ "$report" == *'Wall time: 48:59:29; allowance: 54:20:52'* ]] || fail 'completed time or limit absent'
+[[ "$report" == *'Time margin: +05:21:23'* ]] || fail 'time margin absent'
+[[ "$report" == *'Formal peak RSS: 9.9182128906 GiB; limit: 10 GiB'* ]] || fail 'formal RSS absent'
+[[ "$report" == *'Peak allocated work storage (sampled): 12 GB; limit: 100 GB'* ]] || fail 'disk measurement absent'
+[[ "$report" == *'Cgroup peak memory (includes cache, not RSS)'* ]] || fail 'cache distinction missing'
+[[ "$report" == *'Output MD5 (inferred from verified canonical enwik9): e206c3450ac99950df65bf70ef61a12d'* ]] || fail 'old canonical inference not labelled'
+archive_md5="$(md5sum "$run_results/execution/submitted/archive9" | awk '{print $1}')"
+[[ "$report" == *"submitted archive MD5: $archive_md5"* ]] || fail 'retained archive MD5 not calculated'
+[[ "$report" != *DO_NOT_PUBLISH_SECRET* && "$report" != *"$test_root"* && "$report" != *cloud-test.log* && "$report" != *claim\?key* ]] || fail 'report exposed non-report material'
+report="$(PATH="$test_root/bin:$PATH" bash "$project_dir/judging-status.sh" \
+  --instance hpja-c2d8 --zone africa-south1-a --project test-project \
+  --remote-results "$test_root/Results" --report-only)"
+[[ "$report" == *'Formal size S: 95914051 bytes'* && "$report" != *'Run: '* ]] || fail 'remote report-only flag lost'
+printf 'output_md5=e206c3450ac99950df65bf70ef61a12d\n' >> "$run_results/submitted-decompression/20261010/submitted/verification.env"
+report="$(bash "$project_dir/judging-status.sh" --report-only "$run_results")"
+[[ "$report" == *'Output MD5: e206c3450ac99950df65bf70ef61a12d'* && "$report" != *'Output MD5 (inferred'* ]] || fail 'measured MD5 not distinguished from inference'
 echo 'judging status tests passed'
