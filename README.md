@@ -27,19 +27,21 @@ accepted.
 
 ## Obtain the repository
 
-Use a Git clone so the judging system can materialize its required Git LFS
-objects automatically:
+Clone the judging system; large Git LFS objects are excluded from automatic
+download. The run scripts obtain only the assets they actually need:
 
 ```bash
 git clone https://github.com/jabowery/HutterPrizeJudgingAssistant.git
 cd HutterPrizeJudgingAssistant
 ```
 
-An independently distributed tar or zip archive is usable only if it already
-contains the complete bytes of every Git LFS object. GitHub-generated source
-archives may instead contain small LFS pointer records and have no `.git`
-metadata from which the judging system can fetch their contents. Do not begin a
-formal run from such a pointer-only archive.
+A source tar/zip can also run an external, fully populated submission: the
+pinned Linux Geekbench and UPX archives can be fetched from their publishers
+without Git metadata. Only the optional public example requires its LFS-only
+artifacts to be present or cached, or a Git clone from which to fetch them.
+
+See [Asset downloads and cache](#asset-downloads-and-cache) for cache locations
+and the optional example's first-download requirements.
 
 ## Host requirements
 
@@ -55,7 +57,7 @@ A formal run requires:
   used by Docker images, the repository, input files, and retained results;
 - the exact 1,000,000,000-byte `enwik9` reference and a complete entry
   directory; and
-- temporary outbound Internet access for cloning/LFS materialization, base
+- temporary outbound Internet access for cloning/publisher asset downloads, base
   image and dependency installation, and automatic Geekbench 5 calibration.
 
 On an `apt`-based host, the judging system invokes its separate trusted
@@ -359,7 +361,7 @@ than running it under an unscored compatibility layer.
 
 Invoke `judging_assistance.sh` as an ordinary user. In a Git clone, when
 necessary, it uses the separate `install-host-dependencies.sh` helper to install
-trusted host tools, materializes the required repository objects, and
+trusted host tools, obtains the required assets through the verified cache, and
 re-executes the trusted host orchestrator through `sudo` to access Docker. The
 customary password prompt is the only required interaction. Results created by
 the elevated process are returned to the invoking user's ownership.
@@ -675,6 +677,7 @@ does not let an entrant declare its own score.
 ./tests/test-qualify-archive.sh
 ./tests/test-judging-assistance.sh
 ./tests/test-cloud-launch.sh
+./tests/test-asset-cache.sh
 ```
 
 The qualification-OS test verifies the allow-listed aliases, pinned image
@@ -713,6 +716,45 @@ launch, and permitted descendant execution under the process-tree relaxation.
 In particular, the CPU-bound failure crosses a one-second limit, receives the
 non-terminating `FAIL_TIME` notification, and then exits on its own so the test
 can verify that the worker allowed completion.
+
+## Asset downloads and cache
+
+Before building the common image, every build/run entry point automatically
+checks a persistent, SHA-256-addressed asset cache. Existing complete files or
+local `.git/lfs/objects` seed it without network access; subsequent checkouts
+reuse the cached bytes after verifying both their pinned size and SHA-256.
+Missing Linux tools are fetched directly from the
+[Geekbench publisher](https://cdn.geekbench.com/Geekbench-5.5.1-Linux.tar.gz) and
+the [UPX release](https://github.com/upx/upx/releases/tag/v5.1.1), never through
+this repository's metered LFS endpoint. A publisher failure does not silently
+fall back to Git LFS. Mac/Windows installers are not needed or downloaded.
+
+The cache defaults to `$XDG_CACHE_HOME/hutter-prize/assets`, or
+`~/.cache/hutter-prize/assets`; elevated runs use
+`/var/cache/hutter-prize/assets`. It survives subsequent runs and Git checkouts
+on that host. Deleting a cloud host also deletes its local cache, but its
+replacement still downloads tools from the publishers rather than your LFS
+allowance. No bucket, paid caching service or credentials are required.
+`HP_ASSET_CACHE_DIR` selects another persistent/shared cache. To populate it
+explicitly, without starting a judging run:
+
+```bash
+./fetch-assets.sh
+```
+
+Only selecting `examples/well-formed-entry/` (or explicitly using
+`./fetch-assets.sh --include-example`) fetches the public procedural fixture.
+That fixture has no publisher mirror: its first uncached fetch still consumes
+Git LFS bandwidth, but an existing local copy is cached without downloading.
+Contestant submissions, result trees and credentials are never added to this
+cache. Concurrent fetches share a lock, and incomplete or unverified downloads
+are never published as cache objects.
+
+Keep GitHub's **Include Git LFS objects in archives** repository setting off
+if distributing GitHub-generated source archives: those server-side downloads
+are separate from the client-side cache. Explicit `git lfs pull --exclude=''`
+and older repository revisions can also consume LFS bandwidth. These changes
+neither erase historical LFS storage nor change your GitHub spending budget.
 
 ## Example fixture status
 

@@ -1,0 +1,3 @@
+[lfs]
+    # Obtain only the assets actually used, through the verified asset cache.
+    fetchexclude = *

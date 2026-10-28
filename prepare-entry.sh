@@ -78,6 +78,7 @@ hp_entry_location_require_external_or_fixture "$script_dir" "$entry_dir" \
   || exit 2
 hp_manifest_load "$entry_dir/entry.env" || exit 2
 hp_manifest_require_linux || exit 2
+hp_example_assets_ensure "$script_dir" "$entry_dir" "$source_only" || exit 2
 image="${image:-$(hp_qualification_os_image_tag "$HP_QUALIFICATION_OS")}" \
   || die "could not derive qualification image tag"
 readonly package="$entry_dir/$HP_SOURCE_PACKAGE"

@@ -47,6 +47,7 @@ expect_help() {
 readonly -a scripts=(
   judging_assistance.sh
   judging-status.sh
+  fetch-assets.sh
   qualify-archive.sh
   benchmark.sh
   prepare-entry.sh

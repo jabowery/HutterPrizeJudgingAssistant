@@ -106,6 +106,7 @@ if [[ "$skip_build" == true ]]; then
   docker image inspect "$image" >/dev/null || die "Docker image does not exist: $image"
   hp_qualification_os_verify_image "$image" "$qualification_os" \
     || die "Docker image does not match --qualification-os"
+  hp_tool_assets_ensure "$script_dir" || die "could not obtain the pinned calibration assets"
 else
   hp_qualification_os_build "$qualification_os" "$image" "$script_dir" >&2
 fi

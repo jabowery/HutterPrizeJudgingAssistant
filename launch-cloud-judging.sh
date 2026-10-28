@@ -221,6 +221,9 @@ unexpected_path="$(find "$entry_dir" -mindepth 1 \
   || die "entry transfer rejects non-regular path: $unexpected_path"
 hp_manifest_load "$entry_dir/entry.env" || exit 2
 hp_manifest_require_linux || exit 2
+if [[ "$dry_run" != true ]]; then
+  hp_example_assets_ensure "$script_dir" "$entry_dir" || exit 2
+fi
 [[ -f "$entry_dir/$HP_SOURCE_PACKAGE" \
     && ! -L "$entry_dir/$HP_SOURCE_PACKAGE" ]] \
   || die "entry is missing declared SOURCE_PACKAGE $HP_SOURCE_PACKAGE"

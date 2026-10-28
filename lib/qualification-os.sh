@@ -5,6 +5,10 @@
 # references.  Keep every reference digest-pinned so an alias cannot change
 # underneath a recorded run.
 
+if ! declare -F hp_tool_assets_ensure >/dev/null; then
+  source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/assets.sh"
+fi
+
 readonly HP_DEFAULT_QUALIFICATION_OS=ubuntu-22.04
 
 hp_qualification_os_image() {
@@ -39,6 +43,7 @@ hp_qualification_os_build() {
   local qualification_os_image
   qualification_os_image="$(hp_qualification_os_image "$qualification_os")" \
     || return
+  hp_tool_assets_ensure "$context" || return
   docker build \
     --build-arg "QUALIFICATION_OS=$qualification_os" \
     --build-arg "QUALIFICATION_OS_IMAGE=$qualification_os_image" \

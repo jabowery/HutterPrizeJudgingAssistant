@@ -472,6 +472,7 @@ fi
 (( ${#entry_dirs[@]} > 0 )) || die "no entry directories found in $entries_path"
 
 for entry_dir in "${entry_dirs[@]}"; do
+  hp_example_assets_ensure "$script_dir" "$entry_dir" || exit 2
   if [[ -f "$entry_dir/entry.env" && ! -L "$entry_dir/entry.env" ]]; then
     hp_entry_location_require_external_or_fixture "$script_dir" "$entry_dir" \
       || exit 2
