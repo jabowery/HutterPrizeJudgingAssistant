@@ -16,6 +16,6 @@ hp_judging_state_write() {
       "$source_only" "$HP_ARCHIVE" "$HP_COMPRESSOR"
   } > "$hp_js_tmp"
   chmod 0444 -- "$hp_js_tmp"
-  mv -- "$hp_js_tmp" "$run_results/judging-state.env"
+  mv -f -- "$hp_js_tmp" "$run_results/judging-state.env"
   hp_judging_current_stage="$hp_js_stage"
 }

@@ -13,6 +13,17 @@ mkdir -p "$test_root/Results/full-20261011-test/execution/submitted" \
 run_results="$test_root/Results/full-20261011-test"
 source_only=false HP_ARCHIVE=archive9 HP_COMPRESSOR=comp9
 source "$project_dir/lib/judging-state.sh"
+hp_judging_state_write build
+# Force overwrite prompting even without a terminal (and when run as root).
+# The writer must explicitly disable it, replace the read-only state, and
+# leave the replacement read-only without requiring any operator input.
+(
+  mv() { command mv -i "$@" < /dev/null; }
+  hp_judging_state_write compression
+) 2> "$test_root/state-update.stderr"
+[[ ! -s "$test_root/state-update.stderr" ]] || fail 'state update prompted for input'
+grep -qx 'current_stage=compression' "$run_results/judging-state.env" \
+  || fail 'read-only state was not replaced'
 hp_judging_state_write compression
 [[ "$(stat -c %a "$run_results/judging-state.env")" == 444 ]] || fail 'state is not read-only'
 printf 'reference\n' > "$run_results/execution/submitted/archive9"

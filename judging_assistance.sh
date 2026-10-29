@@ -303,7 +303,7 @@ emit_operator_attention() {
     echo "operator_action=inspect_and_choose_continue_or_terminate"
   } > "$temporary"
   chmod 0444 -- "$temporary"
-  mv -- "$temporary" "$run_results/operator-attention.env"
+  mv -f -- "$temporary" "$run_results/operator-attention.env"
   printf 'OPERATOR_ATTENTION: phase=%s reason=%s; %s; inspect the run and choose whether to continue or terminate.\n' \
     "$phase" "$reason" "$message" \
     | tee -a "$run_results/operator-attention.log" >&2
