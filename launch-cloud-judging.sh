@@ -32,6 +32,7 @@ tmux_session=hutter-judging
 tmux_history_lines=100000
 geekbench_score=""
 dry_run=false
+compression_only=false
 reuse_instance=false
 upload_enwik9_path=""
 declare -a requested_zones=()
@@ -82,6 +83,7 @@ Remote-run options:
   --tmux-session NAME        Default: hutter-judging
   --tmux-history-lines N     Default: 100000
   --geekbench-score N        Reuse a separately verified score
+  --compression-only         Build and compress only; skip both decompression stages
   --upload-enwik9 FILE       Upload a canonical local file instead of downloading
   --dry-run                  Validate local inputs and print the resolved plan
   -h, --help                 Show this help
@@ -153,6 +155,7 @@ while (( $# > 0 )); do
     --tmux-session) (( $# >= 2 )) || usage_error "$1 requires a value"; tmux_session="$2"; shift 2 ;;
     --tmux-history-lines) (( $# >= 2 )) || usage_error "$1 requires a value"; tmux_history_lines="$2"; shift 2 ;;
     --geekbench-score) (( $# >= 2 )) || usage_error "$1 requires a value"; geekbench_score="$2"; shift 2 ;;
+    --compression-only) compression_only=true; shift ;;
     --upload-enwik9) (( $# >= 2 )) || usage_error "$1 requires a value"; upload_enwik9_path="$2"; shift 2 ;;
     --dry-run) dry_run=true; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -222,7 +225,7 @@ unexpected_path="$(find "$entry_dir" -mindepth 1 \
 hp_manifest_load "$entry_dir/entry.env" || exit 2
 hp_manifest_require_linux || exit 2
 if [[ "$dry_run" != true ]]; then
-  hp_example_assets_ensure "$script_dir" "$entry_dir" || exit 2
+  hp_example_assets_ensure "$script_dir" "$entry_dir" "$compression_only" || exit 2
 fi
 [[ -f "$entry_dir/$HP_SOURCE_PACKAGE" \
     && ! -L "$entry_dir/$HP_SOURCE_PACKAGE" ]] \
@@ -232,7 +235,10 @@ source_only=false
 archive_transport=local-entry
 archive_source_url=not_applicable_local_entry
 archive_expected_sha256=not_provided
-if [[ -n "$HP_ARCHIVE_URL" ]]; then
+if [[ "$compression_only" == true ]]; then
+  source_only=true
+  archive_transport=not-required
+elif [[ -n "$HP_ARCHIVE_URL" ]]; then
   archive_transport=cloud-download
   archive_source_url="$HP_ARCHIVE_URL"
   archive_expected_sha256="${HP_ARCHIVE_SHA256:-not_provided}"
@@ -248,7 +254,14 @@ declare -a judging_command=(
 )
 [[ -z "$geekbench_score" ]] \
   || judging_command+=(--geekbench-score "$geekbench_score")
-[[ "$source_only" != true ]] || judging_command+=(--source-only)
+execution_scope=full_submission
+if [[ "$compression_only" == true ]]; then
+  execution_scope=compression_only
+  judging_command+=(--compression-only)
+elif [[ "$source_only" == true ]]; then
+  execution_scope=source_only
+  judging_command+=(--source-only)
+fi
 judging_command+=("../HutterPrizeSubmissions/$entry_name" ./enwik9)
 
 if [[ "$dry_run" == true ]]; then
@@ -262,7 +275,7 @@ if [[ "$dry_run" == true ]]; then
   printf 'archive_present=%s\n' "$([[ "$source_only" == true ]] && echo no || echo yes)"
   printf 'archive_transport=%s\n' "$archive_transport"
   printf 'archive_source_url=%s\n' "$archive_source_url"
-  printf 'execution_mode=%s\n' "$([[ "$source_only" == true ]] && echo source_only || echo full_submission)"
+  printf 'execution_mode=%s\n' "$execution_scope"
   printf 'tmux_history_lines=%s\n' "$tmux_history_lines"
   printf 'reuse_instance=%s\n' "$reuse_instance"
   printf 'enwik9_transport=%s\n' \
@@ -475,7 +488,8 @@ remote_sha256="$(ssh_remote "$(shell_join sha256sum "$remote_tmux_runner")" \
 
 transfer_dir="$(mktemp -d)"
 entry_transport="$transfer_dir/entry.tar.gz"
-tar -C "$(dirname -- "$entry_dir")" -czf "$entry_transport" -- "$entry_name"
+hp_gcloud_entry_transport_make "$entry_dir" "$entry_transport" \
+  "$compression_only" "$HP_ENTRY_FORMAT" "$HP_ARCHIVE" "$HP_DECOMPRESSOR"
 entry_transport_sha256="$(sha256sum -- "$entry_transport" | awk '{print $1}')"
 
 remote_entry_transport="$remote_home/entry-$stamp.tar.gz"
@@ -616,6 +630,8 @@ launch_record="$script_dir/Results/cloud-launch-$stamp-$entry_name.env"
   echo "enwik9_source_url=$enwik9_source_url"
   echo "enwik9_fetch_helper_sha256=$enwik9_fetch_helper_sha256"
   echo "source_only=$source_only"
+  echo "evaluation_scope=$execution_scope"
+  echo "compression_only=$compression_only"
   echo "tmux_session=$tmux_session"
   echo "tmux_socket=$tmux_socket_name"
   echo "tmux_history_lines=$tmux_history_lines"
@@ -625,7 +641,7 @@ launch_complete=true
 
 printf '\nCloud judging workflow started.\n'
 printf 'Instance: %s (%s, project %s)\n' "$instance_name" "$selected_zone" "$project"
-printf 'Mode: %s\n' "$([[ "$source_only" == true ]] && echo source-only || echo full-submission)"
+printf 'Mode: %s\n' "$execution_scope"
 printf 'Local launch record: %s\n' "$launch_record"
 printf 'Status: ./judging-status.sh --launch-record %q\n' "$launch_record"
 printf 'Attach: gcloud compute ssh %q --zone=%q --project=%q -- -t %q\n' \

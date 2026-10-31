@@ -28,6 +28,7 @@ record_size=110793128
 expected_size=1000000000
 cold_cache=false
 source_only=false
+compression_only=false
 cold_cache_helper=""
 active_stage_root=""
 qualification_pid=""
@@ -73,6 +74,7 @@ Options:
   --serial                   Disable adaptive parallel screening
   --cold-cache               Enable cache control for a diagnostic run
   --source-only              Build, compress, and qualify only the generated archive
+  --compression-only         Build and compress only; no decompression or qualification
   --record-size N            Default: 110793128
   --expected-size N          Expected corpus bytes (default: 1000000000)
   -h, --help                 Show this help
@@ -251,6 +253,7 @@ stage_fail() {
   hp_judging_state_write "$stage"
   {
     echo "technical_verdict=FAIL"
+    echo "evaluation_scope=$evaluation_scope"
     echo "failed_stage=$stage"
     echo "reason=$reason"
   } > "$run_results/final.env"
@@ -336,6 +339,7 @@ while (( $# > 0 )); do
     --serial) job_slots=1; job_slots_explicit=true; shift ;;
     --cold-cache) cold_cache=true; shift ;;
     --source-only) source_only=true; shift ;;
+    --compression-only) compression_only=true; shift ;;
     --record-size) (( $# >= 2 )) || usage_error "$1 requires a value"; record_size="$2"; shift 2 ;;
     --expected-size) (( $# >= 2 )) || usage_error "$1 requires a value"; expected_size="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -360,9 +364,16 @@ done
 if [[ "$expected_size" == 1000000000 ]]; then
   cold_cache=true
 fi
+evaluation_scope=full_submission
+if [[ "$compression_only" == true ]]; then
+  source_only=true
+  evaluation_scope=compression_only
+elif [[ "$source_only" == true ]]; then
+  evaluation_scope=source_only
+fi
 if [[ "$source_only" == true ]]; then
   if [[ "$job_slots_explicit" == true && "$job_slots" != 1 ]]; then
-    usage_error "--source-only has no submitted qualification to run in parallel; omit --jobs 2"
+    usage_error "source-only/compression-only execution has no submitted qualification to run in parallel; omit --jobs 2"
   fi
   job_slots=1
 fi
@@ -554,7 +565,12 @@ mkdir -p -- "$run_results/execution/submitted" "$run_results/execution/rebuilt"
 submitted_qualification=skipped_source_only
 if [[ "$source_only" == true ]]; then
   execution_mode=serial
-  echo "[$entry_name] source-only mode: submitted decompression qualification skipped" >&2
+  if [[ "$compression_only" == true ]]; then
+    submitted_qualification=skipped_compression_only
+    echo "[$entry_name] compression-only diagnostic: both decompression stages skipped; this is not a full qualification" >&2
+  else
+    echo "[$entry_name] source-only mode: submitted decompression qualification skipped" >&2
+  fi
 else
   hp_judging_state_write submitted_validation
   submitted_execution_dir="$run_results/execution/submitted"
@@ -994,7 +1010,10 @@ if [[ "$source_only" != true ]]; then
     archives_identical=no
   fi
 fi
-if [[ "$source_only" != true && "$archives_identical" == yes \
+if [[ "$compression_only" == true ]]; then
+  second_decompression=skipped_compression_only
+  echo "[$entry_name] compression complete; generated-archive decompression skipped by --compression-only" >&2
+elif [[ "$source_only" != true && "$archives_identical" == yes \
     && "$rebuilt_decompressor_identical" != no ]]; then
   second_decompression=skipped_identical
   echo "[$entry_name] generated archive is byte-identical; second decompression skipped" >&2
@@ -1063,7 +1082,9 @@ if (( formal_total_bytes <= threshold_bytes )); then
 else
   record_status=DOES_NOT_MEET_ONE_PERCENT
 fi
-if [[ "$source_only" == true ]]; then
+if [[ "$compression_only" == true ]]; then
+  technical_verdict=COMPRESSION_ONLY_PASS
+elif [[ "$source_only" == true ]]; then
   technical_verdict=SOURCE_ONLY_PASS
   evaluation_scope=source_only
 else
@@ -1074,6 +1095,7 @@ fi
 {
   echo "technical_verdict=$technical_verdict"
   echo "evaluation_scope=$evaluation_scope"
+  echo "compression_only=$compression_only"
   echo "submitted_qualification=$submitted_qualification"
   echo "record_status=$record_status"
   echo "entry=$entry_name"
@@ -1123,7 +1145,10 @@ fi
 } > "$run_results/final.env"
 
 {
-  if [[ "$source_only" == true ]]; then
+  if [[ "$compression_only" == true ]]; then
+    echo "Compression-only diagnostic: PASS (not a full qualification)"
+    echo "Submitted and generated-archive decompression: skipped by request"
+  elif [[ "$source_only" == true ]]; then
     echo "Source-only diagnostic: PASS"
     echo "Submitted decompression qualification: skipped"
   else

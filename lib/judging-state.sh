@@ -14,6 +14,7 @@ hp_judging_state_write() {
     printf 'orchestrator_start_ticks=%s\n' "$(awk '{print $22}' /proc/$$/stat)"
     printf 'source_only=%s\narchive_name=%s\ncompressor_name=%s\n' \
       "$source_only" "$HP_ARCHIVE" "$HP_COMPRESSOR"
+    printf 'compression_only=%s\n' "${compression_only:-false}"
   } > "$hp_js_tmp"
   chmod 0444 -- "$hp_js_tmp"
   mv -f -- "$hp_js_tmp" "$run_results/judging-state.env"

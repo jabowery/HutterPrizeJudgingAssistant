@@ -255,8 +255,9 @@ local_snapshot() {
       print "\nJudging measurements and checksums"
       if(data["final","entry"] ~ /^[A-Za-z0-9._-]+$/) print "Entry: " data["final","entry"]
       verdict=data["final","technical_verdict"]
-      if(verdict=="PASS" || verdict=="SOURCE_ONLY_PASS" || verdict=="FAIL") print "Technical verdict: " verdict
+      if(verdict=="PASS" || verdict=="SOURCE_ONLY_PASS" || verdict=="COMPRESSION_ONLY_PASS" || verdict=="FAIL") print "Technical verdict: " verdict
       else print "Technical verdict: not recorded"
+      if(data["final","evaluation_scope"]=="compression_only" || data["state","compression_only"]=="true") print "Scope: compression only; decompression not tested; not a full qualification."
       score=field("submitted-decompression","geekbench5_score")
       if(score=="") score=field("compression","geekbench5_score")
       if(score=="") score=data["calibration","geekbench5_score"]
@@ -281,6 +282,7 @@ local_snapshot() {
       measurements("compression","Rebuilt compression")
       measurements("generated-decompression","Generated-archive decompression")
       if(data["final","second_decompression"]=="skipped_identical") print "\nGenerated-archive decompression: skipped; archive and applicable decompressor were byte-identical to the qualified artifacts."
+      if(data["final","second_decompression"]=="skipped_compression_only") print "\nGenerated-archive decompression: skipped by --compression-only (not tested)."
       print "\nArchive checksums:"
       for(s=1;s<=2;s++) {
         source=s==1?"submitted":"generated"; md5=data["final",source "_archive_md5"]
@@ -318,6 +320,7 @@ local_snapshot() {
         if(i<=6) status=data["stage",s]
         if(status=="") status="NOT_RECORDED"
         if(s=="submitted-decompression" && data["state","source_only"]=="true") status="SKIPPED (source-only)"
+        if((s=="submitted-decompression" || s=="generated-decompression") && (data["state","compression_only"]=="true" || data["final","evaluation_scope"]=="compression_only")) status="SKIPPED (compression-only; not tested)"
         if(s=="generated-decompression" && data["final","second_decompression"]=="skipped_identical") status="SKIPPED (byte-identical)"
         if(status=="NOT_RECORDED" && data[s,"attempt"]=="recorded") status="NO COMPLETED VERDICT"
         failed=data["final","failed_stage"]; gsub(/_/,"-",failed)

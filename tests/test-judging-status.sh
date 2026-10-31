@@ -167,4 +167,11 @@ report="$(PATH="$test_root/bin:$PATH" bash "$project_dir/judging-status.sh" \
 printf 'output_md5=e206c3450ac99950df65bf70ef61a12d\n' >> "$run_results/submitted-decompression/20261010/submitted/verification.env"
 report="$(bash "$project_dir/judging-status.sh" --report-only "$run_results")"
 [[ "$report" == *'Output MD5: e206c3450ac99950df65bf70ef61a12d'* && "$report" != *'Output MD5 (inferred'* ]] || fail 'measured MD5 not distinguished from inference'
+printf 'source_only=true\ncompression_only=true\n' > "$run_results/judging-state.env.new"
+mv -f "$run_results/judging-state.env.new" "$run_results/judging-state.env"
+printf 'technical_verdict=COMPRESSION_ONLY_PASS\nevaluation_scope=compression_only\nsecond_decompression=skipped_compression_only\n' > "$run_results/final.env"
+report="$(bash "$project_dir/judging-status.sh" "$run_results")"
+[[ "$report" == *'Technical verdict: COMPRESSION_ONLY_PASS'* ]] || fail 'compression-only verdict missing'
+[[ "$report" == *'not a full qualification'* ]] || fail 'compression-only result implies full qualification'
+[[ "$(printf '%s\n' "$report" | grep -c 'SKIPPED (compression-only; not tested)')" == 2 ]] || fail 'decompression skips not reported'
 echo 'judging status tests passed'

@@ -235,6 +235,33 @@ watchdog polls only the trusted log marker, rings the terminal bell, and uses
 `notify-send` when available; it does not make or execute the human official's
 decision.
 
+For a compression-only diagnostic, pass `--compression-only` to either
+`judging_assistance.sh` or `launch-cloud-judging.sh`. The system builds the
+compressor and runs compression alone, retaining the generated archive and
+measurements. It does not run either submitted or generated-archive
+decompression. Calibration, storage and security preflights, cold-cache
+controls, and runtime resource limits still apply. The result is labelled
+`COMPRESSION_ONLY_PASS`, not a full qualification. Unlike `--source-only`,
+this mode does not qualify the generated archive. The cloud launcher neither
+uploads nor downloads unused submitted archive/decompressor artifacts.
+
+For example, request a 16 GiB C2D host with a local NVMe work filesystem:
+
+```bash
+./launch-cloud-judging.sh \
+  --compression-only \
+  --project YOUR_PROJECT \
+  --machine-type c2d-highcpu-8 \
+  --threads-per-core 1 \
+  --local-ssd-nvme \
+  --boot-disk-size 90GB \
+  /path/to/external/submission
+```
+
+Only the new cloud host's Geekbench score is used by default; a desktop
+calibration is not reused. The instance remains allocated after the run;
+retrieve the archive and evidence before deleting it.
+
 The 200 GB boot-disk default is intentional. The worker must still have the
 full 100 GB run allowance free after the operating system, Docker images,
 dependency layers, repository, inputs, and retained evidence have consumed

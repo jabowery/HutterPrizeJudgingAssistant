@@ -260,6 +260,45 @@ if grep -q '^judging_command=.*--source-only' "$url_plan"; then
   fail "URL archive command unexpectedly included --source-only"
 fi
 
+# Compression-only takes precedence over a present or URL-declared archive.
+# No submitted artifact needs to be fetched before the cloud run can start.
+for entry in "$source_entry" "$full_entry" "$url_entry"; do
+  plan="$test_root/compression-only-$(basename "$entry")"
+  "$project_dir/launch-cloud-judging.sh" --dry-run --compression-only \
+    --machine-type c2d-highcpu-8 --threads-per-core 1 --local-ssd-nvme \
+    --boot-disk-size 90GB "$entry" > "$plan"
+  grep -qx 'execution_mode=compression_only' "$plan" \
+    || fail 'compression-only scope was lost'
+  grep -qx 'archive_transport=not-required' "$plan" \
+    || fail 'compression-only would fetch an unused archive'
+  grep -q '^judging_command=.*--compression-only' "$plan" \
+    || fail 'compression-only was not forwarded to the remote orchestrator'
+  if grep -q '^judging_command=.*--source-only' "$plan"; then
+    fail 'compression-only was replaced with source-only qualification'
+  fi
+done
+
+# Verify the actual transport archive, not just the plan: unused archive and
+# separate decompressor bytes must never be uploaded in compression-only mode.
+printf 'unused decoder\n' > "$full_entry/decomp9"
+hp_gcloud_entry_transport_make "$full_entry" "$test_root/compression-entry.tar.gz" \
+  true separate-decompressor archive9 decomp9
+tar -tzf "$test_root/compression-entry.tar.gz" > "$test_root/compression-members"
+grep -qx 'FullSubmission/source.tar.gz' "$test_root/compression-members" \
+  || fail 'source package excluded from compression-only transport'
+grep -qx 'FullSubmission/entry.env' "$test_root/compression-members" \
+  || fail 'manifest excluded from compression-only transport'
+if grep -Eq '/(archive9|decomp9)$' "$test_root/compression-members"; then
+  fail 'unused submitted artifacts included in compression-only upload'
+fi
+hp_gcloud_entry_transport_make "$full_entry" "$test_root/full-entry.tar.gz" \
+  false separate-decompressor archive9 decomp9
+tar -tzf "$test_root/full-entry.tar.gz" > "$test_root/full-members"
+grep -qx 'FullSubmission/archive9' "$test_root/full-members" \
+  || fail 'full workflow no longer uploads its submitted archive'
+grep -qx 'FullSubmission/decomp9' "$test_root/full-members" \
+  || fail 'full workflow no longer uploads its submitted decompressor'
+
 grep -q '^readonly enwik9_zip_bytes=322592222$' \
   "$project_dir/cloud/fetch-enwik9.sh" \
   || fail "cloud fetcher does not pin the official ZIP size"

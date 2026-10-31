@@ -1,5 +1,22 @@
 #!/usr/bin/env bash
 
+# Package the separately validated entry handoff, omitting unused submitted
+# artifacts for compression-only runs. Names come from the strict manifest
+# parser; source packages and manifest data are otherwise transferred unchanged.
+hp_gcloud_entry_transport_make() {
+  local entry="$1" output="$2" compression_only="$3" format="$4"
+  local archive="$5" decompressor="$6" name
+  local -a options=()
+  name="$(basename -- "$entry")"
+  if [[ "$compression_only" == true ]]; then
+    options+=(--no-wildcards --exclude="$name/$archive")
+    if [[ "$format" == separate-decompressor ]]; then
+      options+=(--exclude="$name/$decompressor")
+    fi
+  fi
+  tar -C "$(dirname -- "$entry")" -czf "$output" "${options[@]}" -- "$name"
+}
+
 # Retry idempotent uploads because a newly booted Compute Engine SSH service
 # can transiently reset a second connection during key exchange. A retry may
 # overwrite a partial remote file; the caller must verify its digest afterward.
