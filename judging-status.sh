@@ -14,7 +14,7 @@ Options:
   --zone ZONE            Required with --instance
   --project PROJECT      Required with --instance
   --remote-results DIR   Cloud Results directory (default: ~/HutterPrizeJudgingAssistant/Results)
-  --launch-record FILE   Use connection details from a cloud-launch-*.env record
+  --launch-record FILE   Use connection details from a saved launch.env record
   --log FILE             Explicit workflow log, useful for older runs
   --watch SECONDS        Refresh repeatedly (e.g. --watch 60)
   --report-only          Print only verdicts, measurements, sizes and checksums
@@ -61,6 +61,7 @@ if [[ -n "$launch_record" ]]; then
   zone="${zone:-$(value "$launch_record" zone)}"
   project="${project:-$(value "$launch_record" project)}"
   log="${log:-$(value "$launch_record" remote_log)}"
+  remote_results="${remote_results:-$(value "$launch_record" remote_results)}"
   remote_results="${remote_results:-${log%/*}}"
 fi
 if [[ -n "$instance" ]]; then
@@ -88,9 +89,16 @@ local_snapshot() {
   local worker_dir metric package_file archive_name digest role artifact
   [[ -d "$selected" && "$selected" != *$'\n'* ]] || usage_error "invalid results directory: $selected"
   if [[ "$(basename -- "$selected")" != full-* ]]; then
-    selected="$(find -P "$selected" -mindepth 1 -maxdepth 1 -type d -name 'full-*' -print | LC_ALL=C sort | tail -n1)"
+    selected="$(find -P "$selected" -mindepth 1 -maxdepth 2 -type d -name 'full-*' \
+      -printf '%f\t%p\n' | LC_ALL=C sort | tail -n1 | cut -f2-)"
   fi
-  [[ -n "$selected" ]] || usage_error "no full judging runs found"
+  if [[ -z "$selected" ]]; then
+    if [[ -n "$log" && -f "$log" && ! -L "$log" ]]; then
+      printf 'No judging stage results recorded yet; a workflow log is present. Process activity is not confirmed.\n'
+      return 0
+    fi
+    usage_error "no full judging runs found"
+  fi
   selected="$(realpath -- "$selected")"
   parent="$(dirname -- "$selected")"
   state="$selected/judging-state.env"
@@ -208,6 +216,9 @@ local_snapshot() {
     # Older runs have no orchestration metadata. Extract only the last trusted-
     # format status for each output from the matching log, never transfer logs.
     file="$log"
+    if [[ -z "$file" && -r "$parent/workflow.log" ]]; then
+      file="$parent/workflow.log"
+    fi
     if [[ -z "$file" ]]; then
       for candidate in "$parent"/cloud-*.log; do
         [[ -r "$candidate" ]] || continue

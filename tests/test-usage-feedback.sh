@@ -63,6 +63,7 @@ readonly -a scripts=(
   cloud/fetch-enwik9.sh
   scripts/run-in-tmux.sh
   scripts/watch-cloud-judging.sh
+  scripts/cloud-run-control.sh
 )
 
 for script in "${scripts[@]}"; do

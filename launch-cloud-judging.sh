@@ -5,6 +5,7 @@ readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$script_dir/lib/entry-env.sh"
 source "$script_dir/lib/entry-location.sh"
 source "$script_dir/lib/gcloud-transfer.sh"
+source "$script_dir/lib/cloud-run-controls.sh"
 
 readonly canonical_enwik9_url=https://www.mattmahoney.net/dc/enwik9.zip
 readonly canonical_enwik9_md5=e206c3450ac99950df65bf70ef61a12d
@@ -41,6 +42,10 @@ transfer_dir=""
 created_instance=false
 launch_complete=false
 selected_zone=""
+launch_dir=""
+launch_record=""
+launch_phase=setup
+workflow_attempted=false
 
 usage() {
   cat <<'EOF'
@@ -90,8 +95,9 @@ Remote-run options:
 
 The invoking environment supplies local gcloud credentials. They are not
 copied to the cloud host, and the new instance has no attached service account.
-The instance is intentionally retained after setup and execution; the launcher
-prints explicit attach, result-copy, and deletion commands. --reuse-instance
+The instance is intentionally retained after setup and execution. Before setup,
+the launcher saves named commands and connection details in a run-specific
+directory under Results/ and points the operator there. --reuse-instance
 accepts only a running instance with the expected purpose label, no attached
 service account, and the previously installed trusted host tools.
 EOF
@@ -118,14 +124,55 @@ shell_join() {
   printf '%s' "$joined"
 }
 
+write_launch_record() {
+  [[ -n "$launch_dir" && -d "$launch_dir" ]] || return 0
+  local temporary
+  temporary="$(mktemp "$launch_dir/.launch.XXXXXX")"
+  {
+    echo "launch_phase=$launch_phase"
+    echo "workflow_attempted=$workflow_attempted"
+    echo "instance_name=$instance_name"
+    echo "project=$project"
+    echo "zone=$selected_zone"
+    echo "machine_type=$machine_type"
+    echo "boot_disk_size=$boot_disk_size"
+    echo "remote_commit=${remote_commit:-pending}"
+    echo "tmux_runner_sha256=${tmux_runner_sha256:-pending}"
+    echo "entry_name=$entry_name"
+    echo "entry_transport_sha256=${entry_transport_sha256:-pending}"
+    echo "archive_transport=$archive_transport"
+    echo "archive_source_url=$archive_source_url"
+    echo "archive_expected_sha256=$archive_expected_sha256"
+    echo "archive_download_sha256=${archive_download_sha256:-pending}"
+    echo "archive_fetch_helper_sha256=${archive_fetch_helper_sha256:-pending}"
+    echo "enwik9_sha256=$canonical_enwik9_sha256"
+    echo "enwik9_transport=${enwik9_transport:-pending}"
+    echo "enwik9_source_url=${enwik9_source_url:-pending}"
+    echo "enwik9_fetch_helper_sha256=${enwik9_fetch_helper_sha256:-pending}"
+    echo "source_only=$source_only"
+    echo "evaluation_scope=$execution_scope"
+    echo "compression_only=$compression_only"
+    echo "tmux_session=$tmux_session"
+    echo "tmux_socket=$tmux_socket_name"
+    echo "tmux_history_lines=$tmux_history_lines"
+    echo "remote_results=${remote_results:-}"
+    echo "remote_log=${remote_log:-}"
+  } > "$temporary"
+  chmod 0400 -- "$temporary"
+  mv -f -- "$temporary" "$launch_record"
+}
+
 cleanup() {
   if [[ -n "$transfer_dir" && -d "$transfer_dir" ]]; then
     rm -rf -- "$transfer_dir"
   fi
+  if [[ -n "$launch_record" && "$launch_complete" != true ]]; then
+    launch_phase=setup_failed
+    write_launch_record || true
+  fi
   if [[ "$created_instance" == true && "$launch_complete" != true ]]; then
     echo "Cloud setup did not complete; the instance was retained for inspection." >&2
-    printf 'Delete it when finished: gcloud compute instances delete %q --zone=%q --project=%q\n' \
-      "$instance_name" "$selected_zone" "$project" >&2
+    printf 'Run commands and connection details: %s\nUse connect.sh to inspect, or delete-instance.sh when finished.\n' "$launch_dir" >&2
   fi
 }
 trap cleanup EXIT
@@ -295,6 +342,13 @@ fi
   || die "no Google Cloud project is selected; use --project"
 readonly -a project_args=(--project="$project")
 
+stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+launch_dir="$script_dir/Results/cloud-launch-$stamp-$entry_name"
+launch_record="$launch_dir/launch.env"
+hp_cloud_run_controls_create "$script_dir" "$launch_dir"
+write_launch_record
+printf 'Saved run commands: %s\nSee README.txt in that directory.\n' "$launch_dir" >&2
+
 if [[ "$reuse_instance" == true ]]; then
   existing_zone_output="$(
     gcloud compute instances list "${project_args[@]}" \
@@ -371,6 +425,7 @@ else
     || die "cloud instance provisioning failed"
 fi
 created_instance=true
+write_launch_record
 
 ssh_remote_once() {
   gcloud compute ssh "$instance_name" "${project_args[@]}" \
@@ -428,8 +483,11 @@ remote_home="$(ssh_remote 'printf "%s\n" "$HOME"' \
 [[ "$remote_home" == /* && "$remote_home" != / && "$remote_home" != *$'\n'* ]] \
   || die "could not determine a safe remote home directory"
 remote_repo="$remote_home/$remote_repo_name"
+remote_results="$remote_repo/Results/cloud-run-$stamp-$entry_name"
+remote_log="$remote_results/workflow.log"
+judging_command+=(--results "$remote_results")
+write_launch_record
 
-stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 if [[ "$reuse_instance" == true ]]; then
   initialized_command="$(shell_join command -v \
     curl docker flock git git-lfs md5sum sha256sum tar tmux unzip) >/dev/null"
@@ -588,7 +646,6 @@ else
     'Removing the trusted enwik9 fetch helper'
 fi
 
-remote_log="$remote_repo/Results/cloud-$stamp-$entry_name.log"
 tmux_command=(
   bash "$remote_tmux_runner"
   --session "$tmux_session"
@@ -599,6 +656,9 @@ tmux_command=(
   -- "${judging_command[@]}"
 )
 echo "Starting the judging workflow in tmux ($tmux_session)..." >&2
+launch_phase=starting
+workflow_attempted=true
+write_launch_record
 if ssh_remote_once "$(shell_join "${tmux_command[@]}")"; then
   :
 elif ssh_remote "$(shell_join tmux -L "$tmux_socket_name" has-session -t "$tmux_session")" \
@@ -608,48 +668,12 @@ else
   die "could not start or confirm tmux session $tmux_session"
 fi
 
-mkdir -p -- "$script_dir/Results"
-launch_record="$script_dir/Results/cloud-launch-$stamp-$entry_name.env"
-{
-  echo "instance_name=$instance_name"
-  echo "project=$project"
-  echo "zone=$selected_zone"
-  echo "machine_type=$machine_type"
-  echo "boot_disk_size=$boot_disk_size"
-  echo "remote_commit=$remote_commit"
-  echo "tmux_runner_sha256=$tmux_runner_sha256"
-  echo "entry_name=$entry_name"
-  echo "entry_transport_sha256=$entry_transport_sha256"
-  echo "archive_transport=$archive_transport"
-  echo "archive_source_url=$archive_source_url"
-  echo "archive_expected_sha256=$archive_expected_sha256"
-  echo "archive_download_sha256=$archive_download_sha256"
-  echo "archive_fetch_helper_sha256=$archive_fetch_helper_sha256"
-  echo "enwik9_sha256=$canonical_enwik9_sha256"
-  echo "enwik9_transport=$enwik9_transport"
-  echo "enwik9_source_url=$enwik9_source_url"
-  echo "enwik9_fetch_helper_sha256=$enwik9_fetch_helper_sha256"
-  echo "source_only=$source_only"
-  echo "evaluation_scope=$execution_scope"
-  echo "compression_only=$compression_only"
-  echo "tmux_session=$tmux_session"
-  echo "tmux_socket=$tmux_socket_name"
-  echo "tmux_history_lines=$tmux_history_lines"
-  echo "remote_log=$remote_log"
-} > "$launch_record"
+launch_phase=started
+write_launch_record
 launch_complete=true
 
 printf '\nCloud judging workflow started.\n'
 printf 'Instance: %s (%s, project %s)\n' "$instance_name" "$selected_zone" "$project"
 printf 'Mode: %s\n' "$execution_scope"
-printf 'Local launch record: %s\n' "$launch_record"
-printf 'Status: ./judging-status.sh --launch-record %q\n' "$launch_record"
-printf 'Attach: gcloud compute ssh %q --zone=%q --project=%q -- -t %q\n' \
-  "$instance_name" "$selected_zone" "$project" \
-  "tmux -L $tmux_socket_name attach-session -t $tmux_session"
-printf 'Watch: ./scripts/watch-cloud-judging.sh --instance %q --zone %q --project %q --remote-log %q\n' \
-  "$instance_name" "$selected_zone" "$project" "$remote_log"
-printf 'Copy results: gcloud compute scp --recurse --zone=%q --project=%q %q %q\n' \
-  "$selected_zone" "$project" "$instance_name:$remote_repo/Results" ./
-printf 'Delete when finished: gcloud compute instances delete %q --zone=%q --project=%q\n' \
-  "$instance_name" "$selected_zone" "$project"
+printf 'Run commands: %s\n' "$launch_dir"
+printf 'See README.txt; use connect.sh, attach.sh, status.sh, watch.sh, report.sh,\nnotify.sh, logs.sh, fetch-results.sh, or delete-instance.sh there.\n'

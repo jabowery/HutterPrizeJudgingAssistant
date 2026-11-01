@@ -174,4 +174,17 @@ report="$(bash "$project_dir/judging-status.sh" "$run_results")"
 [[ "$report" == *'Technical verdict: COMPRESSION_ONLY_PASS'* ]] || fail 'compression-only verdict missing'
 [[ "$report" == *'not a full qualification'* ]] || fail 'compression-only result implies full qualification'
 [[ "$(printf '%s\n' "$report" | grep -c 'SKIPPED (compression-only; not tested)')" == 2 ]] || fail 'decompression skips not reported'
+# Per-launch result roots must not break default latest-run discovery or cause
+# an explicit launch record to select a newer unrelated run on a reused host.
+mkdir -p "$test_root/Results/cloud-run-new/full-20990101-new"
+printf 'technical_verdict=PASS\nentry=NEWER\n' > "$test_root/Results/cloud-run-new/full-20990101-new/final.env"
+report="$(bash "$project_dir/judging-status.sh" "$test_root/Results")"
+[[ "$report" == *'Entry: NEWER'* ]] || fail 'nested cloud run not discovered by default'
+printf 'remote_results=%s\n' "$run_results" >> "$test_root/launch.env"
+report="$(PATH="$test_root/bin:$PATH" bash "$project_dir/judging-status.sh" --launch-record "$test_root/launch.env")"
+[[ "$report" == *'Technical verdict: COMPRESSION_ONLY_PASS'* && "$report" != *'Entry: NEWER'* ]] || fail 'launch record selected an unrelated newer run'
+mkdir "$test_root/starting"
+touch "$test_root/starting/workflow.log"
+report="$(bash "$project_dir/judging-status.sh" --log "$test_root/starting/workflow.log" "$test_root/starting")"
+[[ "$report" == *'No judging stage results recorded yet'* ]] || fail 'starting workflow status failed'
 echo 'judging status tests passed'

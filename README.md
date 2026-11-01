@@ -143,15 +143,40 @@ handled:
    dedicated server neither reads nor changes the operator's `~/.tmux.conf`
    and does not alter any existing tmux server or session.
 
-Obtain a compact overview without downloading logs or archives:
+Each cloud launch saves a private directory under
+`Results/cloud-launch-RUN-ENTRY/` before provisioning begins. The launcher
+points you there; commands remain available even if setup fails or terminal
+scrollback is lost. From that directory, use:
 
 ```bash
-./judging-status.sh --instance hpja-c2d8 --zone africa-south1-a \
-  --project "$(gcloud config get-value project)"
+./connect.sh        # SSH shell on this instance
+./attach.sh         # Attach to this workflow's tmux session
+./status.sh         # Current stages and measurements; no archive download
+./watch.sh          # Refresh status every 60 seconds; optional interval argument
+./report.sh         # Compact numeric/checksum report
+./notify.sh         # Watch for operator-attention notices
+./logs.sh           # Follow this workflow's log
+./fetch-results.sh  # Save this run to downloads/results.tar.gz; do not extract
+./delete-instance.sh # Delete after confirmation, once results are retrieved
 ```
 
-The launcher also prints a `Status:` command using its local launch record.
-Add `--watch 60` for periodic updates. For local or downloaded results, use
+Every command supports `--help`; `README.txt` describes them. The directory
+contains `launch.env` connection metadata (parsed as data, never sourced) and
+copies of trusted status tools. Helpers work from any working directory and
+after moving the entire run directory or updating the repository. They target
+this launch's remote results directory, not a later run on a reused instance.
+Status reports setup state until the workflow is launched. Run directories,
+logs, results, and any private download URLs are local evidence, not material
+to commit or publish without review.
+
+Remote evidence for each new launch lives under its own
+`Results/cloud-run-RUN-ENTRY/`, including `workflow.log` and the full judging
+results tree. Fetching results includes archives and may be large; the saved
+bundle is validated before replacing any prior download and is never extracted
+or executed automatically. The instance remains billable after completion or
+setup failure; deletion destroys its Local SSD, including unretrieved results.
+
+For local or downloaded results, use
 `./judging-status.sh Results/full-RUN-NAME`, or omit the path to select the
 latest run under `Results/`.
 
@@ -230,8 +255,8 @@ failure by itself. `--serial` disables this adaptive scheduling. Because two
 requires at least 32 GiB of host RAM and automatically falls back to serial on
 a smaller machine.
 
-The cloud launcher prints a ready-to-run `Watch:` command. Its desktop
-watchdog polls only the trusted log marker, rings the terminal bell, and uses
+Each cloud launch's saved `notify.sh` command starts a desktop watchdog that
+polls only the trusted log marker, rings the terminal bell, and uses
 `notify-send` when available; it does not make or execute the human official's
 decision.
 
@@ -704,6 +729,8 @@ does not let an entrant declare its own score.
 ./tests/test-qualify-archive.sh
 ./tests/test-judging-assistance.sh
 ./tests/test-cloud-launch.sh
+./tests/test-cloud-run-controls.sh
+./tests/test-compression-only.sh
 ./tests/test-asset-cache.sh
 ```
 
@@ -734,7 +761,10 @@ while the trusted worker remains unchanged and its execution monitor remains
 statically linked. The cloud-launch test uses simulated gcloud and tmux clients
 to verify capacity fallback, fixed identity hardening, option forwarding,
 manifest-driven source-only selection, and persistent scrollback without
-creating billable infrastructure. The integration tests generate their own
+creating billable infrastructure. The cloud-run-controls test exercises the
+saved commands, per-launch result scoping, setup-failure recovery, portable
+tool snapshots, and verified downloads without creating an instance. The
+integration tests generate their own
 small entries and alternate `entry.env` manifests under a temporary directory.
 Those synthetic entries cover tar and ZIP source packages, both official entry
 forms, parallel cancellation, memory/time/content failures, hidden build
